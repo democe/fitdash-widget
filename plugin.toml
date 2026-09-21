@@ -1,0 +1,92 @@
+id = "shawn/fitdash"
+name = "FitDash"
+version = "0.1.0"
+plugin_api = 24
+author = "shawn"
+license = "MIT"
+icon = "walk"
+description = "Your Fitbit steps and health summary, locally cached through Google Health."
+dependencies = ["python3"]
+tags = ["health", "fitness"]
+
+[[setting]]
+key = "backend"
+type = "file"
+label_key = "settings.backend"
+default = "~/.local/share/fitdash-widget/venv/bin/fitdash"
+
+[[setting]]
+key = "client"
+type = "file"
+label_key = "settings.client"
+default = "~/.config/fitdash-widget/client.json"
+
+[[setting]]
+key = "interval"
+type = "int"
+label_key = "settings.interval"
+default = 300
+min = 60
+max = 3600
+
+[[setting]]
+key = "goal"
+type = "int"
+label_key = "settings.goal"
+default = 10000
+min = 1
+max = 100000
+
+[[setting]]
+key = "units"
+type = "select"
+label_key = "settings.units"
+default = "auto"
+options = [{value="auto", label_key="units.auto"}, {value="metric", label_key="units.metric"}, {value="imperial", label_key="units.imperial"}]
+
+[[setting]]
+key = "timezone"
+type = "string"
+label_key = "settings.timezone"
+default = ""
+
+[[setting]]
+key = "source"
+type = "select"
+label_key = "settings.source"
+default = "all-sources"
+options = [{value="all-sources", label_key="sources.all"}, {value="google-wearables", label_key="sources.wearables"}, {value="google-sources", label_key="sources.google"}]
+
+[[setting]]
+key = "sleep"
+type = "bool"
+label_key = "settings.sleep"
+default = true
+
+[[setting]]
+key = "vitals"
+type = "bool"
+label_key = "settings.vitals"
+default = true
+
+[[setting]]
+key = "demo"
+type = "bool"
+label_key = "settings.demo"
+default = false
+
+[[widget]]
+id = "steps"
+entry = "widget.luau"
+
+[[service]]
+id = "sync"
+entry = "service.luau"
+
+[[panel]]
+id = "details"
+entry = "panel.luau"
+width = 480
+height = 660
+placement = "floating"
+position = "center"
