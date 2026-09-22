@@ -286,3 +286,78 @@ def test_oauth_denied_does_not_replace_credentials(tmp_path, monkeypatch):
         authenticate(client, vault, Cache(tmp_path / "state"))
     vault.save.assert_not_called()
     flow.fetch_token.assert_not_called()
+
+
+def test_corrupt_snapshot_schema_recovers(tmp_path):
+    from fitdash.cli import snapshot
+
+    cache = Cache(tmp_path)
+    cache.write("snapshot.json", {"version": 1, "metrics": [{"key": "steps", "value": "garbage"}]})
+    assert snapshot(cache)["status"] == "invalid_cache"
+
+
+def test_history_prunes_and_replaces_corrections(tmp_path):
+    cache = Cache(tmp_path)
+    cache.write("history.json", {"2026-09-01": {"steps": 100}, "2026-09-20": {"steps": {"value": 900}}})
+    cache.merge_history([metric("steps", 800, period="2026-09-20")], date(2026, 9, 21))
+    history = cache.read("history.json")
+    assert "2026-09-01" not in history
+    assert history["2026-09-20"]["steps"]["value"] == 800
+    cache.clear_health()
+    assert cache.read("history.json") is None
+
+
+def test_recent_days_backfill_is_separate_from_today():
+    client = api(
+        {
+            "rollupDataPoints": [
+                {
+                    "civilStartTime": {"date": {"year": 2026, "month": 9, "day": 20}},
+                    "steps": {"countSum": "1200"},
+                },
+                {
+                    "civilStartTime": {"date": {"year": 2026, "month": 9, "day": 21}},
+                    "steps": {"countSum": "200"},
+                },
+            ]
+        }
+    )
+    result = client.daily(("steps", "steps", "countSum", ""), date(2026, 9, 21), recent_days=2)
+    assert result["value"] == 200
+    assert result["recent"][0]["value"] == 1200
+    assert result["recent"][0]["period"] == "2026-09-20"
+
+
+def test_sleep_and_vitals_keep_original_fetch_time_until_due(tmp_path, monkeypatch):
+    cache = Cache(tmp_path)
+    cache.write(
+        "snapshot.json",
+        {
+            "version": 1,
+            "metrics": [
+                metric("sleep", 400, period="2026-09-21", group="sleep", fetched_at=990),
+                metric("resting-heart-rate", 60, period="2026-09-21", group="vitals", fetched_at=990),
+            ],
+        },
+    )
+    client = Mock()
+    client.settings.return_value = {}
+    client.collect.return_value = [metric("steps", 100, period="2026-09-21", group="activity")]
+    monkeypatch.setattr("fitdash.cli.GoogleHealth", Mock(return_value=client))
+    monkeypatch.setattr("fitdash.cli.refreshed", Mock(return_value=Mock(token="fake", scopes=[])))
+    monkeypatch.setattr("fitdash.cli.time.time", lambda: 1000)
+    result = sync(cache, Mock(), parser().parse_args(["sync"]))
+    assert client.collect.call_args.args[1:] == (False, False)
+    assert next(m for m in result["metrics"] if m["key"] == "sleep")["fetched_at"] == 990
+
+
+def test_transient_refresh_failure_does_not_require_reauthorization():
+    from google.auth.exceptions import RefreshError
+
+    credentials = Mock(valid=False)
+    credentials.refresh.side_effect = RefreshError("service unavailable", retryable=True)
+    vault = Mock()
+    vault.load.return_value = credentials
+    with pytest.raises(AuthError, match="^offline$"):
+        refreshed(vault)
+    vault.clear.assert_not_called()

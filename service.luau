@@ -34,6 +34,10 @@ local function run(command, force)
       local ok, data = pcall(noctalia.json.decode, result.stdout)
       if ok and type(data) == "table" and data.version == 1 then
         if data.status ~= "busy" then state = data end
+        if data.status == "authorizing" and not authorizing then
+          authorizing = true
+          authStarted = os.time()
+        end
         if authorizing and data.status ~= "authorizing" and os.time() - authStarted > 3 then
           authorizing = false
           lastSync = 0
@@ -53,9 +57,9 @@ local function run(command, force)
   end
 end
 function onIpc(event, _payload)
+  if noctalia.getConfig("demo") then run("demo") return end
   if event == "status" then run("status") return end
   if busy or authorizing then return end
-  if noctalia.getConfig("demo") then run("demo") return end
   if event == "auth" then
     authorizing = true
     authStarted = os.time()

@@ -53,3 +53,24 @@ class Cache:
                 yield
             finally:
                 fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def merge_history(self, metrics, day, retention=7):
+        """Retain only normalized daily values; backfilled corrections replace old totals."""
+        from datetime import timedelta
+
+        history = self.read("history.json", {})
+        cutoff = str(day - timedelta(days=retention - 1))
+        history = {
+            d: values
+            for d, values in history.items()
+            if isinstance(d, str) and cutoff <= d <= str(day) and isinstance(values, dict)
+        }
+        for metric in metrics:
+            period = metric.get("period", "")
+            if metric.get("status") == "available" and cutoff <= period <= str(day):
+                history.setdefault(period, {})[metric["key"]] = metric
+        self.write("history.json", history)
+
+    def clear_health(self):
+        for name in ("snapshot.json", "scheduler.json", "history.json"):
+            self.remove(name)

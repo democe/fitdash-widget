@@ -73,14 +73,17 @@ class GoogleHealth:
             return {}
         return self.request("settings")
 
-    def daily(self, spec, day):
+    def daily(self, spec, day, recent_days=1):
         datatype, field, value_field, unit = spec
 
         def civil(d):
             return {"date": {"year": d.year, "month": d.month, "day": d.day}}
 
         body = {
-            "range": {"start": civil(day), "end": civil(day + timedelta(days=1))},
+            "range": {
+                "start": civil(day - timedelta(days=recent_days - 1)),
+                "end": civil(day + timedelta(days=1)),
+            },
             "windowSizeDays": 1,
             "dataSourceFamily": self.source,
         }
@@ -100,7 +103,24 @@ class GoogleHealth:
                     number(data.get(k, 0))
                     for k in ("sumInPeakHeartZone", "sumInFatBurnHeartZone", "sumInCardioHeartZone")
                 )
-        return metric(datatype, value, unit, day.isoformat(), group="activity")
+        result = metric(datatype, value, unit, day.isoformat(), group="activity")
+        recent = []
+        for row in rows:
+            period = civil_date(row["civilStartTime"]["date"])
+            if not (str(day - timedelta(days=recent_days - 1)) <= period < str(day)) or field not in row:
+                continue
+            previous = row[field]
+            previous_value = (
+                number(previous.get(value_field, 0))
+                if value_field
+                else sum(
+                    number(previous.get(k, 0))
+                    for k in ("sumInPeakHeartZone", "sumInFatBurnHeartZone", "sumInCardioHeartZone")
+                )
+            )
+            recent.append(metric(datatype, previous_value, unit, period, group="activity"))
+        result["recent"] = recent
+        return result
 
     def records(self, datatype, expression):
         params = {"filter": expression, "pageSize": 25, "dataSourceFamily": self.source}
@@ -152,7 +172,7 @@ class GoogleHealth:
         return metric("sleep", value, "sleep_min", period, group="sleep")
 
     def collect(self, day, sleep=True, vitals=True):
-        jobs = [(s[0], "activity", lambda s=s: self.daily(s, day)) for s in ACTIVITY]
+        jobs = [(s[0], "activity", lambda s=s: self.daily(s, day, recent_days=2)) for s in ACTIVITY]
         if sleep:
             jobs.append(("sleep", "sleep", lambda: self.sleep(day)))
         if vitals:
@@ -179,7 +199,7 @@ class GoogleHealth:
                 return metric(
                     key, period=day.isoformat(), status=status, group=group, retry_after=error.retry_after
                 )
-            except (ValueError, KeyError, TypeError, IndexError):
+            except (ValueError, KeyError, TypeError, IndexError, AttributeError):
                 return metric(key, period=day.isoformat(), status="invalid_response", group=group)
 
         with ThreadPoolExecutor(max_workers=8) as pool:

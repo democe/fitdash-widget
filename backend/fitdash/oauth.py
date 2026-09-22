@@ -125,8 +125,7 @@ def authenticate(client_path, vault, cache, scopes=SCOPES):
     if not creds.refresh_token:
         raise AuthError("refresh_token_missing")
     vault.save(creds)
-    cache.remove("snapshot.json")
-    cache.remove("scheduler.json")
+    cache.clear_health()
     cache.write("auth.json", {"status": "connected", "completed_at": time.time()})
 
 
@@ -145,8 +144,8 @@ def refreshed(vault, force=False):
                     return super().__call__(*args, **kwargs)
 
             creds.refresh(TimedRequest())
-        except RefreshError:
-            raise AuthError("reconnect_required") from None
+        except RefreshError as error:
+            raise AuthError("offline" if error.retryable else "reconnect_required") from None
         except TransportError:
             raise AuthError("offline") from None
         vault.save(creds)
