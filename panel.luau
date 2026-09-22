@@ -23,7 +23,7 @@ local function render()
     if m.group ~= previousGroup then
       previousGroup = m.group
       table.insert(rows, label(noctalia.tr("group." .. (m.group or "activity")), {
-        color = "primary", fontWeight = "bold", fontSize = 12,
+        color = "primary", fontWeight = "bold", fontSize = 14,
       }))
     end
     local detail = m.period or ""
@@ -31,7 +31,6 @@ local function render()
     table.insert(rows, ui.row({ gap = 16, align = "center", paddingV = 7 }, {
       ui.column({ flexGrow = 1, gap = 3 }, {
         label(noctalia.tr("metric." .. m.key), { color = "on_surface", fontSize = 14 }),
-        label(detail, { color = "on_surface_variant", fontSize = 11 }),
       }),
       label(m.display or "—", { fontWeight = "bold", color = m.status == "stale" and "on_surface_variant" or "on_surface", fontSize = 16 }),
     }))
@@ -60,7 +59,7 @@ local function render()
       ui.button({ glyph = "close", onClick = function() panel.close() end }),
     }),
     ui.column({ gap = 6, padding = 16, radius = 12, fill = "primary/0.10" }, {
-      label(snapshot.today or noctalia.tr("today"), { color = "on_surface_variant", fontSize = 12 }),
+      label(snapshot.today or noctalia.tr("today"), { color = "on_surface_variant", fontSize = 14 }),
       label(snapshot.steps_text or "—", { fontSize = 36, fontWeight = "bold", color = "primary" }),
       label(noctalia.tr("steps_goal") .. " " .. tostring(goal), { color = "on_surface_variant" }),
       ui.progress({ progress = steps and math.clamp(steps / goal, 0, 1) or 0, height = 5, fill = "primary", track = "primary/0.15", radius = 3 }),
@@ -69,7 +68,7 @@ local function render()
     label(noctalia.tr("status." .. status), { color = "on_surface_variant", fontSize = 12, maxLines = 2 }),
   }
   if snapshot.updated_at then
-    table.insert(children, label(noctalia.tr("fetched") .. " " .. noctalia.formatTime("{:%H:%M}", snapshot.updated_at), { color = "on_surface_variant", fontSize = 11 }))
+    table.insert(children, label(noctalia.tr("fetched") .. " " .. noctalia.formatTime("{:%Y-%m-%d %H:%M}", snapshot.updated_at), { color = "on_surface_variant", fontSize = 11 }))
   end
   if confirmation ~= "" then
     table.insert(children, label(noctalia.tr(confirmation == "disconnect" and "disconnect_confirm" or "clear_cache_confirm"), { maxLines = 2 }))
