@@ -13,13 +13,48 @@ local function label(text, props)
   props.text = text
   return ui.label(props)
 end
+local function enabledMetrics()
+  local metrics = {}
+  for _, metric in ipairs(snapshot.metrics or {}) do
+    if (metric.group ~= "sleep" or noctalia.getConfig("sleep"))
+      and (metric.group ~= "vitals" or noctalia.getConfig("vitals")) then
+      table.insert(metrics, metric)
+    end
+  end
+  return metrics
+end
+local function copySummary()
+  local lines = {
+    noctalia.tr("title"),
+    noctalia.tr("Date") .. ": " .. (snapshot.today or "—"),
+    noctalia.tr("metric.steps") .. ": " .. (snapshot.steps_text or "—"),
+    noctalia.tr("settings.goal") .. ": " .. tostring(noctalia.getConfig("goal")),
+    "",
+    "| " .. table.concat({ noctalia.tr("copy.metric"), noctalia.tr("copy.value"), noctalia.tr("copy.date"), noctalia.tr("copy.status") }, " | ") .. " |",
+    "| ----- | ----- | ----- | ----- |",
+  }
+  for _, metric in ipairs(enabledMetrics()) do
+    table.insert(lines, "| " .. table.concat({
+      noctalia.tr("metric." .. metric.key), metric.display or "—", metric.period or "—",
+      noctalia.tr("metric_status." .. (metric.status or "no_data")),
+    }, " | ") .. " |")
+  end
+  if snapshot.status == "demo" then
+    table.insert(lines, "\n" .. noctalia.tr("status.demo"))
+  end
+  if noctalia.copyToClipboard(table.concat(lines, "\n"), "text/plain") then
+    noctalia.notify(noctalia.tr("title"), noctalia.tr("copy.success"))
+  else
+    noctalia.notifyError(noctalia.tr("title"), noctalia.tr("copy.failed"))
+  end
+end
 local function render()
   local status = snapshot.status or "loading"
   local steps = snapshot.steps
   local goal = noctalia.getConfig("goal")
   local rows = {}
   local previousGroup = ""
-  for _, m in ipairs(snapshot.metrics or {}) do
+  for _, m in ipairs(enabledMetrics()) do
     if m.group ~= previousGroup then
       previousGroup = m.group
       table.insert(rows, label(noctalia.tr("group." .. (m.group or "activity")), {
@@ -56,6 +91,8 @@ local function render()
     ui.row({ gap = 8, align = "center" }, {
       ui.glyph({ name = "walk", color = "primary", size = 22 }),
       label(noctalia.tr("title"), { fontSize = 20, fontWeight = "bold", flexGrow = 1 }),
+      ui.button({ glyph = "copy", tooltip = noctalia.tr("copy.summary"),
+        enabled = snapshot.steps ~= nil or #enabledMetrics() > 0, onClick = copySummary }),
       ui.button({ glyph = "close", onClick = function() panel.close() end }),
     }),
     ui.column({ gap = 6, padding = 16, radius = 12, fill = "primary/0.10" }, {

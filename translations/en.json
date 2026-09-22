@@ -72,5 +72,12 @@
   "status.refresh_token_missing": "No refresh token received. Reconnect and grant access.",
   "status.stale": "Showing cached steps · refresh pending",
   "clear_cache": "Clear cache",
-  "clear_cache_confirm": "Remove cached health readings? Your Google connection will remain available."
+  "clear_cache_confirm": "Remove cached health readings? Your Google connection will remain available.",
+  "copy.summary": "Copy summary",
+  "copy.date": "Date",
+  "copy.metric": "Metric",
+  "copy.value": "Value",
+  "copy.status": "Status",
+  "copy.success": "Summary copied to clipboard.",
+  "copy.failed": "Could not copy the summary to the clipboard."
 }

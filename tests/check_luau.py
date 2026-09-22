@@ -21,6 +21,9 @@ noctalia = {
  setUpdateInterval = function(ms) assert(ms >= 1000) end,
  togglePanel = function(id) opened = id end,
  openSettings = function() opened = "settings" end,
+ copyToClipboard = function(text, mime) values.clipboard = text values.mime = mime return not values.copyFails end,
+ notify = function(title, message) values.notice = message end,
+ notifyError = function(title, message) values.error = message end,
  runAsync = function(argv, cb) table.insert(processes, argv) asyncCallback = cb return true end,
  json = {decode = function(text) return values.response end},
  state = {
@@ -63,6 +66,35 @@ controls.children[1].props.onClick()
 assert(values.request.command == "refresh")
 watches.busy(true)
 assert(tree.children[#tree.children].children[1].props.enabled == false)
+
+config.sleep = false
+config.vitals = true
+watches.snapshot({status="connected",today="2026-09-21",steps=0,steps_text="0",metrics={
+ {key="steps",display="0",period="2026-09-21",group="activity",status="available"},
+ {key="distance",display="1.25 mi",period="2026-09-21",group="activity",status="available"},
+ {key="sleep",display="7 h 00 min",period="2026-09-21",group="sleep",status="available"},
+ {key="hrv",period="2026-09-20",group="vitals",status="no_data"},
+ {key="resting-heart-rate",display="60 bpm",period="2026-09-20",group="vitals",status="stale"},
+}})
+local copy = tree.children[1].children[3]
+assert(copy.props.glyph == "copy" and copy.props.enabled)
+copy.props.onClick()
+assert(values.mime == "text/plain")
+assert(string.find(values.clipboard, "| copy.metric | copy.value | copy.date | copy.status |\n| ----- | ----- | ----- | ----- |", 1, true))
+assert(string.find(values.clipboard, "Date: 2026-09-21", 1, true))
+assert(string.find(values.clipboard, "metric.steps: 0", 1, true))
+assert(string.find(values.clipboard, "settings.goal: 10000", 1, true))
+assert(string.find(values.clipboard, "| metric.distance | 1.25 mi | 2026-09-21 | metric_status.available |", 1, true))
+assert(not string.find(values.clipboard, "metric.sleep", 1, true))
+assert(string.find(values.clipboard, "| metric.hrv | — | 2026-09-20 | metric_status.no_data |", 1, true))
+assert(string.find(values.clipboard, "| metric.resting-heart-rate | 60 bpm | 2026-09-20 | metric_status.stale |", 1, true))
+assert(values.notice == "copy.success")
+values.copyFails = true
+copy.props.onClick()
+assert(values.error == "copy.failed")
+watches.snapshot({status="loading",metrics={}})
+assert(tree.children[1].children[3].props.enabled == false)
+
 """,
     "service.luau": r"""
 update()

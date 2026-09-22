@@ -30,6 +30,8 @@ The legacy Fitbit Web API is not used. Existing legacy Fitbit tokens cannot be i
 
 ## Behavior and settings
 
+Use the **Copy summary** button beside the panel’s close button to copy the date, steps, daily goal, and enabled table rows as a Markdown table. Display units, observation dates, and data statuses are preserved.
+
 - **Steps and activity:** refresh every five minutes by default; configurable from 60–3600 seconds.
 - **Sleep and vitals:** refresh every thirty minutes, or during an explicit manual refresh. Values show their observation dates. Sleep is the latest main sleep, falling back to the latest session, and displays minutes asleep rather than time in bed.
 - **Refresh:** requests fresh data, subject to a 30-second cooldown and server backoff. Reading the cloud API does not force your wearable to sync.
