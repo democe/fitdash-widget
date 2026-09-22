@@ -1,8 +1,8 @@
-id = "shawn/fitdash"
+id = "democe/fitdash"
 name = "FitDash"
 version = "0.1.0"
 plugin_api = 24
-author = "shawn"
+author = "Shawn Reavis"
 license = "MIT"
 icon = "walk"
 description = "Your Fitbit steps and health summary, locally cached through Google Health."

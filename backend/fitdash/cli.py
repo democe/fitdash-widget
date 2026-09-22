@@ -147,7 +147,7 @@ def sync(cache, vault, args):
 
 def execute(args):
     cache = Cache(args.state_dir)
-    vault = Vault("shawn/fitdash")
+    vault = Vault("democe/fitdash")
     if args.command == "demo":
         from fitdash.model import metric
 

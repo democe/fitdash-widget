@@ -26,5 +26,5 @@ function update()
   render()
 end
 function onClick()
-  noctalia.togglePanel("shawn/fitdash:details")
+  noctalia.togglePanel("democe/fitdash:details")
 end

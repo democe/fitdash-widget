@@ -50,7 +50,7 @@ values.vertical = true
 update()
 assert(tree.kind == "column")
 onClick()
-assert(opened == "shawn/fitdash:details")
+assert(opened == "democe/fitdash:details")
 """,
     "panel.luau": r"""
 onOpen(nil)

@@ -10,5 +10,5 @@ else
   ln -s -- "$project_dir" "$plugin_dir"
 fi
 noctalia msg config-reload
-noctalia msg plugins enable shawn/fitdash
-printf '%s\n' 'FitDash enabled. Add shawn/fitdash:steps to a bar using Noctalia settings.'
+noctalia msg plugins enable democe/fitdash
+printf '%s\n' 'FitDash enabled. Add democe/fitdash:steps to a bar using Noctalia settings.'

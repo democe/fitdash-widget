@@ -12,9 +12,9 @@ Requirements: Python 3.11+, `uv`, Noctalia, a browser, and an unlocked desktop *
 ./scripts/install.sh
 ```
 
-This installs locked Python dependencies into `~/.local/share/fitdash-widget/venv`, links this checkout into the local Noctalia plugin directory, and enables `shawn/fitdash`. Keep the checkout in place: both the development plugin and Python package refer to it. `XDG_DATA_HOME` changes the installation destination; if you use a nondefault destination, set **Backend executable** in FitDash settings accordingly.
+This installs locked Python dependencies into `~/.local/share/fitdash-widget/venv`, links this checkout into the local Noctalia plugin directory, and enables `democe/fitdash`. Keep the checkout in place: both the development plugin and Python package refer to it. `XDG_DATA_HOME` changes the installation destination; if you use a nondefault destination, set **Backend executable** in FitDash settings accordingly.
 
-Add **FitDash / steps** through Noctalia's bar settings. Its fully qualified type is `shawn/fitdash:steps`. The installer does not replace your bar layout. Middle-click the bar widget to open widget settings; the panel's gear opens shared plugin settings.
+Add **FitDash / steps** through Noctalia's bar settings. Its fully qualified type is `democe/fitdash:steps`. The installer does not replace your bar layout. Middle-click the bar widget to open widget settings; the panel's gear opens shared plugin settings.
 
 ## Connect Google Health
 
@@ -24,7 +24,7 @@ Add **FitDash / steps** through Noctalia's bar settings. Its fully qualified typ
 
 The base scopes are `googlehealth.activity_and_fitness.readonly` and `googlehealth.settings.readonly`. Sleep and vitals add `googlehealth.sleep.readonly` and `googlehealth.health_metrics_and_measurements.readonly`. All use the `https://www.googleapis.com/auth/` prefix. Disable unwanted groups before connecting to omit those optional scopes. Reconnect after enabling additional groups. Previously granted permissions remain granted until changed/revoked in Google; hiding a group is not revocation.
 
-OAuth uses Google's Python libraries, Authorization Code + PKCE, and a random validated state. Access/refresh tokens stay in Secret Service under service `fitdash-widget:shawn/fitdash`, account `google-health`. There is no plaintext-token fallback. Google projects in **Testing** issue refresh tokens that expire after seven days; use **Reconnect** when needed. See [Google setup and token lifecycle](https://developers.google.com/health/setup).
+OAuth uses Google's Python libraries, Authorization Code + PKCE, and a random validated state. Access/refresh tokens stay in Secret Service under service `fitdash-widget:democe/fitdash`, account `google-health`. There is no plaintext-token fallback. Google projects in **Testing** issue refresh tokens that expire after seven days; use **Reconnect** when needed. See [Google setup and token lifecycle](https://developers.google.com/health/setup).
 
 The legacy Fitbit Web API is not used. Existing legacy Fitbit tokens cannot be imported.
 
@@ -68,9 +68,9 @@ LUAU=/path/to/luau uv run python tests/check_luau.py
 The second command runs Python lint and fixture-based backend tests. The third runs widget, panel and service behavior checks with a real Luau VM and mocked Noctalia APIs. Obtain Luau from the [official project](https://github.com/luau-lang/luau/releases).
 
 ```sh
-noctalia msg panel-open shawn/fitdash:details
-noctalia msg plugin shawn/fitdash:sync all refresh
-noctalia msg plugin shawn/fitdash:sync all status
+noctalia msg panel-open democe/fitdash:details
+noctalia msg plugin democe/fitdash:sync all refresh
+noctalia msg plugin democe/fitdash:sync all status
 ```
 
 The backend CLI supports `status`, `sync`, `auth`, `disconnect`, `clear-cache`, and `demo`. Commands return one JSON response. **Status/sync output contains your health measurements**; avoid pasting it into public logs. Error responses contain fixed status codes, never upstream error messages. A cached status read does not contact Google or unlock the keyring.
@@ -89,7 +89,7 @@ Architecture: `service.luau` owns polling and publishes sanitized snapshots; `wi
 Use **Disconnect** first if you want to revoke access and erase local credentials/data. Disable the plugin with:
 
 ```sh
-noctalia msg plugins disable shawn/fitdash
+noctalia msg plugins disable democe/fitdash
 ```
 
 Remove the FitDash widget from your bar settings, then remove the FitDash symlink and backend environment if no longer wanted. The client JSON is separate and may be removed independently. Do not restore an old complete Noctalia settings backup over newer unrelated changes; remove only the FitDash entry.
