@@ -230,7 +230,12 @@ def execute(args):
             "imperial" if data.get("settings", {}).get("distanceUnit") == "DISTANCE_UNIT_MILES" else "metric"
         )
     return present(
-        data, time.time(), units, today(args.timezone or data.get("timezone", "")).isoformat(), args.interval
+        data,
+        time.time(),
+        units,
+        today(args.timezone or data.get("timezone", "")).isoformat(),
+        args.interval,
+        args.goal,
     )
 
 
@@ -240,6 +245,7 @@ def parser():
     p.add_argument("--state-dir", default=str(default_state()))
     p.add_argument("--client", default=str(Path.home() / ".config/fitdash-widget/client.json"))
     p.add_argument("--interval", type=int, default=300)
+    p.add_argument("--goal", type=int, default=10000)
     p.add_argument("--force", action="store_true")
     p.add_argument(
         "--source", choices=["all-sources", "google-wearables", "google-sources"], default="all-sources"

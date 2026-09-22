@@ -1,5 +1,12 @@
 --!nonstrict
 local snapshot = noctalia.state.get("snapshot") or { status = "loading" }
+local function formatGoal(goal)
+  if snapshot.goal == goal and snapshot.goal_text then
+    return snapshot.goal_text
+  end
+  -- Until the backend presents this goal, avoid guessing locale grouping.
+  return tostring(math.floor(goal or 0))
+end
 local function render()
   local status = snapshot.status or "loading"
   local text = snapshot.steps_text or "—"
@@ -12,8 +19,8 @@ local function render()
     ui.glyph({ name = "walk", size = 16, color = color }),
     ui.label({ text = text, fontWeight = "Regular" }),
   }))
-  local tooltip = noctalia.tr("title") .. " · " .. (snapshot.today or "") .. "\n"
-  if steps then tooltip ..= tostring(math.floor(steps / goal * 100)) .. "% · " .. noctalia.tr("goal") .. " " .. tostring(goal) .. "\n" end
+  local tooltip = noctalia.tr("title") .. " · " .. (snapshot.today_text or snapshot.today or "") .. "\n"
+  if steps then tooltip ..= tostring(math.floor(steps / goal * 100)) .. "% · " .. noctalia.tr("goal") .. " " .. formatGoal(goal) .. "\n" end
   tooltip ..= noctalia.tr("status." .. status)
   if snapshot.updated_at then tooltip ..= "\n" .. noctalia.tr("fetched") .. " " .. noctalia.formatTime("{:%H:%M}", snapshot.updated_at) end
   barWidget.setTooltip(tooltip)

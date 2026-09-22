@@ -57,12 +57,27 @@ def test_midnight_does_not_display_yesterday_steps_as_today():
     assert old["metrics"][0]["status"] == "available"
 
 
-def test_units_and_missing_values():
+def test_units_and_missing_values(monkeypatch):
+    monkeypatch.setenv("LC_ALL", "C")
+    monkeypatch.setattr("locale.localeconv", lambda: {"decimal_point": ".", "thousands_sep": "", "grouping": []})
     assert format_value(1609344, "mm", "imperial").endswith("1.00 mi")
     assert format_value(462, "sleep_min") == "7 h 42 min"
     assert format_value(None, "") == "—"
     with pytest.raises(ValueError):
         metric("steps", float("nan"))
+
+
+@pytest.mark.parametrize("separator,grouping,expected", [("", [], "10000"), (",", [3, 0], "10,000"), (".", [3, 0], "10.000"), ("\u202f", [3, 0], "10\u202f000")])
+def test_goal_formatting_and_progress(monkeypatch, separator, grouping, expected):
+    monkeypatch.setattr("locale.localeconv", lambda: {"decimal_point": ".", "thousands_sep": separator, "grouping": grouping})
+    snap = {"metrics": [metric("steps", 8432, period="2026-09-21", group="activity")]}
+    res = present(snap, 100, "metric", "2026-09-21", goal=10000)
+    assert res["goal"] == 10000
+    assert res["goal_text"] == expected
+    assert res["goal_percent"] == 84
+
+    args = parser().parse_args(["status", "--goal", "12500"])
+    assert args.goal == 12500
 
 
 def test_private_atomic_cache_and_corruption(tmp_path):
@@ -186,7 +201,10 @@ def test_revoked_credentials_become_reconnect():
     vault.save.assert_not_called()
 
 
-def test_oauth_validates_state_and_does_not_log_code(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("language", ["en_US.UTF-8", "fr_FR.UTF-8", "zz_ZZ.UTF-8"])
+def test_oauth_validates_state_and_does_not_log_code(tmp_path, monkeypatch, capsys, language):
+    monkeypatch.setenv("LC_ALL", language)
+    monkeypatch.delenv("LANGUAGE", raising=False)
     import threading
     import urllib.parse
     import urllib.request
@@ -211,6 +229,7 @@ def test_oauth_validates_state_and_does_not_log_code(tmp_path, monkeypatch, caps
     )
     monkeypatch.setattr("fitdash.oauth.InstalledAppFlow.from_client_config", Mock(return_value=flow))
     callback_statuses = []
+    responses = []
     threads = []
 
     def open_browser(url):
@@ -226,8 +245,10 @@ def test_oauth_validates_state_and_does_not_log_code(tmp_path, monkeypatch, caps
                 try:
                     with urllib.request.urlopen(target) as r:
                         callback_statuses.append(r.status)
+                        responses.append((r.headers, r.read().decode("utf-8")))
                 except urllib.error.HTTPError as error:
                     callback_statuses.append(error.code)
+                    responses.append((error.headers, error.read().decode("utf-8")))
 
         thread = threading.Thread(target=callback)
         thread.start()
@@ -241,6 +262,17 @@ def test_oauth_validates_state_and_does_not_log_code(tmp_path, monkeypatch, caps
     for thread in threads:
         thread.join(timeout=5)
     assert callback_statuses == [400, 200]
+    for headers, body in responses:
+        assert "charset=utf-8" in headers["Content-Type"]
+        assert headers["Cache-Control"] == "no-store"
+        assert "never-log-this-code" not in body
+    if language.startswith("fr"):
+        assert "Réponse d’autorisation non valide" in responses[0][1]
+        assert "Autorisation reçue" in responses[1][1]
+        assert 'lang="fr"' in responses[1][1]
+    else:
+        assert "Invalid authorization callback" in responses[0][1]
+        assert "Authorization received" in responses[1][1]
     flow.fetch_token.assert_called_once_with(code="never-log-this-code", timeout=20)
     vault.save.assert_called_once()
     assert cache.read("auth.json")["status"] == "connected"
@@ -249,6 +281,8 @@ def test_oauth_validates_state_and_does_not_log_code(tmp_path, monkeypatch, caps
 
 
 def test_oauth_denied_does_not_replace_credentials(tmp_path, monkeypatch):
+    monkeypatch.setenv("LC_ALL", "fr_FR.UTF-8")
+    monkeypatch.delenv("LANGUAGE", raising=False)
     from fitdash.oauth import authenticate
 
     client = tmp_path / "client.json"
@@ -274,16 +308,19 @@ def test_oauth_denied_does_not_replace_credentials(tmp_path, monkeypatch):
     server.__enter__ = Mock(return_value=server)
     server.__exit__ = Mock(return_value=False)
 
+    responses = []
+
     def make(_host, _port, app, **_kwargs):
-        server.handle_request.side_effect = lambda: app(
+        server.handle_request.side_effect = lambda: responses.extend(app(
             {"PATH_INFO": "/", "QUERY_STRING": "state=" + state["state"] + "&error=access_denied"}, Mock()
-        )
+        ))
         return server
 
     monkeypatch.setattr("fitdash.oauth.make_server", make)
     vault = Mock()
     with pytest.raises(AuthError, match="authorization_denied"):
         authenticate(client, vault, Cache(tmp_path / "state"))
+    assert "L’autorisation a été refusée" in b"".join(responses).decode("utf-8")
     vault.save.assert_not_called()
     flow.fetch_token.assert_not_called()
 
@@ -361,3 +398,106 @@ def test_transient_refresh_failure_does_not_require_reauthorization():
     with pytest.raises(AuthError, match="^offline$"):
         refreshed(vault)
     vault.clear.assert_not_called()
+
+
+def test_translations_key_parity():
+    from pathlib import Path
+
+    trans_dir = Path(__file__).resolve().parents[1] / "translations"
+    en = json.loads((trans_dir / "en.json").read_text(encoding="utf-8"))
+    for lang_file in trans_dir.glob("*.json"):
+        data = json.loads(lang_file.read_text(encoding="utf-8"))
+        assert set(data.keys()) == set(en.keys()), f"Key mismatch in {lang_file.name}"
+
+
+@pytest.mark.parametrize("environment,expected", [
+    ({"LANG": "fr_CA.UTF-8"}, "fr"),
+    ({"LANG": "en_US.UTF-8", "LC_MESSAGES": "fr_FR.UTF-8"}, "fr"),
+    ({"LC_ALL": "C", "LANGUAGE": "fr"}, "en"),
+    ({"LC_ALL": "en_US.UTF-8", "LANGUAGE": "zz:fr:en"}, "fr"),
+    ({"LANG": "../../fr"}, "en"),
+])
+def test_callback_locale_selection(monkeypatch, environment, expected):
+    from fitdash.i18n import translation_catalog
+
+    for key in ("LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    language, messages = translation_catalog()
+    assert language == expected
+    assert messages["oauth.received"]
+
+
+@pytest.mark.parametrize("language,hour", [("en", "h"), ("fr", "h"), ("nl", "u"), ("zz", "h")])
+def test_localized_unit_presentation(monkeypatch, language, hour):
+    monkeypatch.setenv("LC_ALL", language + "_XX.UTF-8")
+    monkeypatch.delenv("LANGUAGE", raising=False)
+    monkeypatch.setattr("locale.localeconv", lambda: {
+        "decimal_point": ",", "thousands_sep": ".", "grouping": [3, 0],
+    })
+    assert format_value(1609344, "mm", "imperial") == "1,00 mi"
+    assert format_value(1000000, "mm") == "1,00 km"
+    assert format_value(462, "sleep_min") == f"7 {hour} 42 min"
+    assert format_value(420, "sleep_min") == f"7 {hour} 00 min"
+    for unit, expected in [("kcal", "12 kcal"), ("bpm", "12 bpm"),
+                           ("ms", "12,0 ms"), ("%", "12,0 %"), ("min", "12 min")]:
+        assert format_value(12, unit) == expected
+    assert format_value(0, "bpm") == "0 bpm"
+    assert format_value(None, "bpm") == "—"
+    assert format_value(1234, "") == "1.234"
+    snap = {"metrics": [metric("sleep", 462, "sleep_min")]}
+    assert present(snap, 0, "metric", "2026-09-22")["metrics"][0]["display"] == f"7 {hour} 42 min"
+    assert snap["metrics"][0]["unit"] == "sleep_min"
+    assert "display" not in snap["metrics"][0]
+
+
+def test_unit_templates_control_labels_and_spacing():
+    messages = {"format.measurement": "{value}\u00a0{unit}", "unit.bpm": "beats/min"}
+    assert format_value(60, "bpm", messages=messages) == "60\u00a0beats/min"
+
+
+def test_translation_format_placeholders():
+    from pathlib import Path
+    from string import Formatter
+
+    directory = Path(__file__).resolve().parents[1] / "translations"
+    for path in directory.glob("*.json"):
+        messages = json.loads(path.read_text(encoding="utf-8"))
+        for key, expected in {
+            "format.measurement": {"value", "unit"},
+            "format.sleep": {"hours", "hour_unit", "minutes", "minute_unit"},
+            "format.date": {"year", "month", "day"},
+        }.items():
+            fields = {field for _, field, _, _ in Formatter().parse(messages[key]) if field is not None}
+            assert fields == expected, (path.name, key)
+
+
+@pytest.mark.parametrize("language,expected", [
+    ("en", "09/22/2026"), ("fr", "22/09/2026"), ("nl", "22-09-2026"),
+])
+def test_localized_dates_preserve_civil_dates(monkeypatch, language, expected):
+    from datetime import datetime
+    from fitdash.i18n import translation_catalog
+    from fitdash.model import format_date
+
+    monkeypatch.setenv("LC_ALL", language + "_XX.UTF-8")
+    monkeypatch.delenv("LANGUAGE", raising=False)
+    _, messages = translation_catalog()
+    stamp = datetime(2026, 9, 22, 12).timestamp()
+    snap = {"updated_at": stamp, "metrics": [
+        metric("steps", 123, period="2026-09-22", group="activity", fetched_at=stamp),
+        metric("sleep", 400, "sleep_min", period="2026-09-21"),
+    ]}
+    result = present(snap, stamp, "metric", "2026-09-22")
+    assert result["today_text"] == expected
+    assert result["updated_date_text"] == expected
+    assert result["metrics"][0]["period_text"] == expected
+    assert result["metrics"][1]["period_text"] == format_date("2026-09-21", messages)
+    assert result["today"] == "2026-09-22"
+    assert result["steps"] == 123
+    assert snap["metrics"][0]["period"] == "2026-09-22"
+    assert "period_text" not in snap["metrics"][0]
+    assert format_date("2024-02-29", messages) != "—"
+    for invalid in (None, "", "2025-02-29", "invalid"):
+        assert format_date(invalid, messages) == "—"

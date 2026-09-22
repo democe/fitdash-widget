@@ -79,5 +79,19 @@
   "copy.value": "Value",
   "copy.status": "Status",
   "copy.success": "Summary copied to clipboard.",
-  "copy.failed": "Could not copy the summary to the clipboard."
+  "copy.failed": "Could not copy the summary to the clipboard.",
+  "oauth.invalid_callback": "Invalid authorization callback. Return to FitDash and try again.",
+  "oauth.received": "Authorization received. You can close this tab and return to the widget.",
+  "oauth.denied": "Authorization was declined. Return to FitDash and try again.",
+  "unit.km": "km",
+  "unit.mi": "mi",
+  "unit.kcal": "kcal",
+  "unit.bpm": "bpm",
+  "unit.ms": "ms",
+  "unit.%": "%",
+  "unit.h": "h",
+  "unit.min": "min",
+  "format.measurement": "{value} {unit}",
+  "format.sleep": "{hours} {hour_unit} {minutes} {minute_unit}",
+  "format.date": "{month}/{day}/{year}"
 }

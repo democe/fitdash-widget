@@ -13,6 +13,13 @@ local function label(text, props)
   props.text = text
   return ui.label(props)
 end
+local function formatGoal(goal)
+  if snapshot.goal == goal and snapshot.goal_text then
+    return snapshot.goal_text
+  end
+  -- Until the backend presents this goal, avoid guessing locale grouping.
+  return tostring(math.floor(goal or 0))
+end
 local function enabledMetrics()
   local metrics = {}
   for _, metric in ipairs(snapshot.metrics or {}) do
@@ -26,16 +33,16 @@ end
 local function copySummary()
   local lines = {
     noctalia.tr("title"),
-    noctalia.tr("Date") .. ": " .. (snapshot.today or "—"),
+    noctalia.tr("copy.date") .. ": " .. (snapshot.today_text or snapshot.today or "—"),
     noctalia.tr("metric.steps") .. ": " .. (snapshot.steps_text or "—"),
-    noctalia.tr("settings.goal") .. ": " .. tostring(noctalia.getConfig("goal")),
+    noctalia.tr("settings.goal") .. ": " .. formatGoal(noctalia.getConfig("goal")),
     "",
     "| " .. table.concat({ noctalia.tr("copy.metric"), noctalia.tr("copy.value"), noctalia.tr("copy.date"), noctalia.tr("copy.status") }, " | ") .. " |",
     "| ----- | ----- | ----- | ----- |",
   }
   for _, metric in ipairs(enabledMetrics()) do
     table.insert(lines, "| " .. table.concat({
-      noctalia.tr("metric." .. metric.key), metric.display or "—", metric.period or "—",
+      noctalia.tr("metric." .. metric.key), metric.display or "—", metric.period_text or metric.period or "—",
       noctalia.tr("metric_status." .. (metric.status or "no_data")),
     }, " | ") .. " |")
   end
@@ -61,8 +68,6 @@ local function render()
         color = "primary", fontWeight = "bold", fontSize = 14,
       }))
     end
-    local detail = m.period or ""
-    if m.status ~= "available" then detail ..= " · " .. noctalia.tr("metric_status." .. m.status) end
     table.insert(rows, ui.row({ gap = 16, align = "center", paddingV = 7 }, {
       ui.column({ flexGrow = 1, gap = 3 }, {
         label(noctalia.tr("metric." .. m.key), { color = "on_surface", fontSize = 14 }),
@@ -96,16 +101,16 @@ local function render()
       ui.button({ glyph = "close", onClick = function() panel.close() end }),
     }),
     ui.column({ gap = 6, padding = 16, radius = 12, fill = "primary/0.10" }, {
-      label(snapshot.today or noctalia.tr("today"), { color = "on_surface_variant", fontSize = 14 }),
+      label(snapshot.today_text or snapshot.today or noctalia.tr("today"), { color = "on_surface_variant", fontSize = 14 }),
       label(snapshot.steps_text or "—", { fontSize = 36, fontWeight = "bold", color = "primary" }),
-      label(noctalia.tr("steps_goal") .. " " .. tostring(goal), { color = "on_surface_variant" }),
+      label(noctalia.tr("steps_goal") .. " " .. formatGoal(goal), { color = "on_surface_variant" }),
       ui.progress({ progress = steps and math.clamp(steps / goal, 0, 1) or 0, height = 5, fill = "primary", track = "primary/0.15", radius = 3 }),
     }),
     ui.scroll({ flexGrow = 1, gap = 5 }, rows),
     label(noctalia.tr("status." .. status), { color = "on_surface_variant", fontSize = 12, maxLines = 2 }),
   }
   if snapshot.updated_at then
-    table.insert(children, label(noctalia.tr("fetched") .. " " .. noctalia.formatTime("{:%Y-%m-%d %H:%M}", snapshot.updated_at), { color = "on_surface_variant", fontSize = 11 }))
+    table.insert(children, label(noctalia.tr("fetched") .. " " .. (snapshot.updated_date_text or "—") .. " " .. noctalia.formatTime("{:%H:%M}", snapshot.updated_at), { color = "on_surface_variant", fontSize = 11 }))
   end
   if confirmation ~= "" then
     table.insert(children, label(noctalia.tr(confirmation == "disconnect" and "disconnect_confirm" or "clear_cache_confirm"), { maxLines = 2 }))

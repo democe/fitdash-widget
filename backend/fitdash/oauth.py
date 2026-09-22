@@ -1,5 +1,6 @@
 """Google desktop OAuth with PKCE and Secret Service storage."""
 
+import html
 import json
 import os
 import secrets
@@ -12,6 +13,8 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from keyring.backends.SecretService import Keyring
+
+from fitdash.i18n import translation_catalog
 
 PREFIX = "https://www.googleapis.com/auth/googlehealth."
 SCOPES = [
@@ -79,20 +82,26 @@ def authenticate(client_path, vault, cache, scopes=SCOPES):
     flow = InstalledAppFlow.from_client_config(config, scopes=scopes, autogenerate_code_verifier=True)
     state = secrets.token_urlsafe(32)
     result = {}
+    language, messages = translation_catalog()
 
     def callback(environ, start_response):
         query = urllib.parse.parse_qs(environ.get("QUERY_STRING", ""))
         valid = environ.get("PATH_INFO") == "/" and secrets.compare_digest(query.get("state", [""])[0], state)
         if not valid:
-            start_response("400 Bad Request", [("Content-Type", "text/plain")])
-            return [b"Invalid authorization callback. Return to FitDash and try again."]
+            start_response("400 Bad Request", [("Content-Type", "text/plain; charset=utf-8"), ("Cache-Control", "no-store")])
+            return [messages["oauth.invalid_callback"].encode("utf-8")]
         result.update(query)
         start_response(
             "200 OK", [("Content-Type", "text/html; charset=utf-8"), ("Cache-Control", "no-store")]
         )
-        return [
-            b"<html><title>FitDash</title><body><h1>FitDash</h1><p>Authorization received. You can close this tab and return to the widget.</p></body></html>"
-        ]
+        key = "oauth.denied" if "error" in query or not query.get("code") else "oauth.received"
+        body = (
+            f'<!doctype html><html lang="{html.escape(language, quote=True)}" dir="auto">'
+            '<meta charset="utf-8"><title>FitDash</title><body><h1>FitDash</h1>'
+            f'<p>{html.escape(messages[key])}</p></body></html>'
+        )
+        return [body.encode("utf-8")]
+
 
     with make_server("127.0.0.1", 0, callback, handler_class=QuietHandler) as server:
         server.timeout = 1

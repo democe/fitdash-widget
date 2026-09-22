@@ -15,6 +15,7 @@ local function arguments(command)
     noctalia.expandPath(noctalia.getConfig("backend")), command,
     "--client", noctalia.expandPath(noctalia.getConfig("client")),
     "--interval", tostring(noctalia.getConfig("interval")),
+    "--goal", tostring(noctalia.getConfig("goal")),
     "--units", noctalia.getConfig("units"),
     "--timezone", noctalia.getConfig("timezone"),
     "--source", noctalia.getConfig("source"),
