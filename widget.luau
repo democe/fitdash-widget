@@ -10,7 +10,7 @@ local function render()
   local color = (status == "connected" or status == "demo") and "primary" or "on_surface_variant"
   barWidget.render(container({ gap = 6, align = "center" }, {
     ui.glyph({ name = "walk", size = 16, color = color }),
-    ui.label({ text = text, fontWeight = "bold", color = color }),
+    ui.label({ text = text, fontWeight = "Regular" }),
   }))
   local tooltip = noctalia.tr("title") .. " · " .. (snapshot.today or "") .. "\n"
   if steps then tooltip ..= tostring(math.floor(steps / goal * 100)) .. "% · " .. noctalia.tr("goal") .. " " .. tostring(goal) .. "\n" end
