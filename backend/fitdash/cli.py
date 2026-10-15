@@ -5,11 +5,12 @@ import json
 import os
 import random
 import time
+from datetime import datetime
 from pathlib import Path
 
 from fitdash.cache import Busy, Cache
-from fitdash.model import number, present, today
-from fitdash.oauth import AuthError, Vault, authenticate, refreshed, SCOPES
+from fitdash.model import InvalidTimezone, number, present, today
+from fitdash.oauth import SCOPES, AuthError, Vault, authenticate, refreshed
 from fitdash.providers.google_health import ApiError, GoogleHealth
 
 
@@ -19,13 +20,21 @@ def default_state():
 
 def snapshot(cache):
     data = cache.read("snapshot.json", {})
-    if data.get("version") != 1 or not isinstance(data.get("metrics"), list):
+    if type(data.get("version")) is not int or data["version"] != 1 or not isinstance(data.get("metrics"), list):
         return {"version": 1, "status": "disconnected", "metrics": []}
     if any(not isinstance(m, dict) or not isinstance(m.get("key"), str) for m in data["metrics"]):
         return {"version": 1, "status": "invalid_cache", "metrics": []}
     try:
         if not isinstance(data.get("settings", {}), dict):
             raise ValueError("settings")
+        settings = data.get("settings", {})
+        for key in ("timeZone", "distanceUnit"):
+            if key in settings and not isinstance(settings[key], str):
+                raise ValueError("account setting")
+        if "_fetched_at" in settings:
+            stamp = settings["_fetched_at"]
+            if isinstance(stamp, (bool, str)) or number(stamp) is None:
+                raise ValueError("settings timestamp")
         keys = set()
         for item in data["metrics"]:
             if item["key"] in keys:
@@ -43,8 +52,10 @@ def snapshot(cache):
         for key in ("updated_at", "retry_at", "attempted_at"):
             if key in data and (isinstance(data[key], (bool, str)) or number(data[key]) is None):
                 raise ValueError("timestamp")
+        if "updated_at" in data:
+            datetime.fromtimestamp(data["updated_at"])
         today(data.get("timezone", ""))
-    except (ValueError, TypeError, KeyError):
+    except (ValueError, TypeError, KeyError, OverflowError, OSError):
         return {"version": 1, "status": "invalid_cache", "metrics": []}
     return data
 
@@ -146,6 +157,18 @@ def sync(cache, vault, args):
 
 
 def execute(args):
+    try:
+        if args.command not in ("disconnect", "clear-cache"):
+            today(args.timezone)
+        return _execute(args)
+    except InvalidTimezone:
+        return present(
+            {"version": 1, "status": "invalid_timezone", "metrics": []},
+            time.time(), args.units, today().isoformat(), args.interval, args.goal,
+        )
+
+
+def _execute(args):
     cache = Cache(args.state_dir)
     vault = Vault("democe/fitdash")
     if args.command == "demo":
@@ -213,6 +236,8 @@ def execute(args):
                                 data["status"] = "disconnected_revocation_failed"
                         except requests.RequestException:
                             data["status"] = "disconnected_revocation_failed"
+            except InvalidTimezone:
+                raise
             except AuthError as error:
                 data = snapshot(cache)
                 data["status"] = str(error)
@@ -233,7 +258,7 @@ def execute(args):
         data,
         time.time(),
         units,
-        today(args.timezone or data.get("timezone", "")).isoformat(),
+        today("" if args.command in ("disconnect", "clear-cache") else args.timezone or data.get("timezone", "")).isoformat(),
         args.interval,
         args.goal,
     )

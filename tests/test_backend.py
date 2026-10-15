@@ -4,12 +4,11 @@ from datetime import date
 from unittest.mock import Mock
 
 import pytest
-
 from fitdash.cache import Busy, Cache
 from fitdash.cli import parser, sync
 from fitdash.model import format_value, metric, present
 from fitdash.oauth import PREFIX, AuthError, Vault, refreshed
-from fitdash.providers.google_health import GoogleHealth, ApiError
+from fitdash.providers.google_health import ApiError, GoogleHealth
 
 
 def api(response):
@@ -93,10 +92,8 @@ def test_private_atomic_cache_and_corruption(tmp_path):
 
 def test_operation_lock_prevents_overlap(tmp_path):
     cache = Cache(tmp_path)
-    with cache.lock():
-        with pytest.raises(Busy):
-            with Cache(tmp_path).lock():
-                pass
+    with cache.lock(), pytest.raises(Busy), Cache(tmp_path).lock():
+        pass
 
 
 def test_missing_scope_does_not_make_network_request():
@@ -196,7 +193,7 @@ def test_revoked_credentials_become_reconnect():
     credentials.refresh.side_effect = RefreshError("secret must not appear")
     vault = Mock()
     vault.load.return_value = credentials
-    with pytest.raises(AuthError, match="^reconnect_required$"):
+    with pytest.raises(AuthError, match=r"^reconnect_required$"):
         refreshed(vault)
     vault.save.assert_not_called()
 
@@ -208,6 +205,7 @@ def test_oauth_validates_state_and_does_not_log_code(tmp_path, monkeypatch, caps
     import threading
     import urllib.parse
     import urllib.request
+
     from fitdash.oauth import authenticate
 
     client_file = tmp_path / "client.json"
@@ -236,7 +234,7 @@ def test_oauth_validates_state_and_does_not_log_code(tmp_path, monkeypatch, caps
         state = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["state"][0]
 
         def callback():
-            for supplied_state in ("wrong", state):
+            for supplied_state in ("wrong", "état-invalide", state):
                 target = (
                     flow.redirect_uri
                     + "?"
@@ -261,18 +259,18 @@ def test_oauth_validates_state_and_does_not_log_code(tmp_path, monkeypatch, caps
     authenticate(client_file, vault, cache)
     for thread in threads:
         thread.join(timeout=5)
-    assert callback_statuses == [400, 200]
+    assert callback_statuses == [400, 400, 200]
     for headers, body in responses:
         assert "charset=utf-8" in headers["Content-Type"]
         assert headers["Cache-Control"] == "no-store"
         assert "never-log-this-code" not in body
     if language.startswith("fr"):
-        assert "Réponse d’autorisation non valide" in responses[0][1]
-        assert "Autorisation reçue" in responses[1][1]
-        assert 'lang="fr"' in responses[1][1]
+        assert "Réponse d’autorisation non valide" in responses[0][1]  # noqa: RUF001 — French typography
+        assert "Autorisation reçue" in responses[-1][1]
+        assert 'lang="fr"' in responses[-1][1]
     else:
         assert "Invalid authorization callback" in responses[0][1]
-        assert "Authorization received" in responses[1][1]
+        assert "Authorization received" in responses[-1][1]
     flow.fetch_token.assert_called_once_with(code="never-log-this-code", timeout=20)
     vault.save.assert_called_once()
     assert cache.read("auth.json")["status"] == "connected"
@@ -320,7 +318,7 @@ def test_oauth_denied_does_not_replace_credentials(tmp_path, monkeypatch):
     vault = Mock()
     with pytest.raises(AuthError, match="authorization_denied"):
         authenticate(client, vault, Cache(tmp_path / "state"))
-    assert "L’autorisation a été refusée" in b"".join(responses).decode("utf-8")
+    assert "L’autorisation a été refusée" in b"".join(responses).decode("utf-8")  # noqa: RUF001 — French typography
     vault.save.assert_not_called()
     flow.fetch_token.assert_not_called()
 
@@ -395,7 +393,7 @@ def test_transient_refresh_failure_does_not_require_reauthorization():
     credentials.refresh.side_effect = RefreshError("service unavailable", retryable=True)
     vault = Mock()
     vault.load.return_value = credentials
-    with pytest.raises(AuthError, match="^offline$"):
+    with pytest.raises(AuthError, match=r"^offline$"):
         refreshed(vault)
     vault.clear.assert_not_called()
 
@@ -478,6 +476,7 @@ def test_translation_format_placeholders():
 ])
 def test_localized_dates_preserve_civil_dates(monkeypatch, language, expected):
     from datetime import datetime
+
     from fitdash.i18n import translation_catalog
     from fitdash.model import format_date
 
@@ -501,3 +500,92 @@ def test_localized_dates_preserve_civil_dates(monkeypatch, language, expected):
     assert format_date("2024-02-29", messages) != "—"
     for invalid in (None, "", "2025-02-29", "invalid"):
         assert format_date(invalid, messages) == "—"
+
+
+@pytest.mark.parametrize("command", ["status", "sync", "auth", "demo"])
+@pytest.mark.parametrize("timezone", ["Not/AZone", "../UTC", "/etc/localtime"])
+def test_invalid_timezone_is_actionable_without_side_effects(tmp_path, command, timezone):
+    from fitdash.cli import execute
+
+    state = tmp_path / "state"
+    args = parser().parse_args([command, "--state-dir", str(state), "--timezone", timezone])
+    result = execute(args)
+    assert result["version"] == 1
+    assert result["status"] == "invalid_timezone"
+    assert result["metrics"] == []
+    assert timezone not in json.dumps(result)
+    assert not state.exists()
+
+
+def test_invalid_account_timezone_preserves_cache(tmp_path, monkeypatch):
+    from fitdash.cli import execute
+
+    cache = Cache(tmp_path)
+    cache.write("snapshot.json", {"version": 1, "metrics": []})
+    before = (tmp_path / "snapshot.json").read_bytes()
+    monkeypatch.setattr("fitdash.cli.refreshed", lambda _: Mock(token="test", scopes=[]))
+    monkeypatch.setattr(GoogleHealth, "settings", lambda _: {"timeZone": "Bad/Zone"})
+    result = execute(parser().parse_args(["sync", "--state-dir", str(tmp_path)]))
+    assert result["status"] == "invalid_timezone"
+    assert (tmp_path / "snapshot.json").read_bytes() == before
+
+
+def test_clear_cache_works_with_invalid_timezone(tmp_path):
+    from fitdash.cli import execute
+
+    result = execute(parser().parse_args(["clear-cache", "--state-dir", str(tmp_path), "--timezone", "Bad/Zone"]))
+    assert result["status"] == "cache_cleared"
+
+
+@pytest.mark.parametrize("body", [None, {"range": {}}])
+def test_api_requests_accept_json(monkeypatch, body):
+    response = Mock(status_code=200)
+    response.iter_content.return_value = [b'{"result": 1}']
+    request = Mock()
+    request.return_value.__enter__ = Mock(return_value=response)
+    request.return_value.__exit__ = Mock(return_value=False)
+    monkeypatch.setattr("requests.request", request)
+    assert GoogleHealth("test-token", []).request("settings", body) == {"result": 1}
+    assert request.call_args.kwargs["headers"]["Accept"] == "application/json"
+    assert request.call_args.args[0] == ("GET" if body is None else "POST")
+
+
+@pytest.mark.parametrize("change", [
+    {"settings": {"_fetched_at": "garbage"}},
+    {"settings": {"_fetched_at": None}},
+    {"settings": {"_fetched_at": True}},
+    {"settings": {"timeZone": []}},
+    {"settings": {"distanceUnit": {}}},
+    {"updated_at": 1e100},
+])
+def test_corrupt_cached_settings_and_timestamps_are_rejected(tmp_path, change):
+    from fitdash.cli import execute, snapshot
+
+    cache = Cache(tmp_path)
+    cache.write("snapshot.json", {"version": 1, "metrics": [], **change})
+    assert snapshot(cache)["status"] == "invalid_cache"
+    assert execute(parser().parse_args(["status", "--state-dir", str(tmp_path)]))["status"] == "invalid_cache"
+
+
+def test_boolean_is_not_a_snapshot_version(tmp_path):
+    from fitdash.cli import snapshot
+
+    cache = Cache(tmp_path)
+    cache.write("snapshot.json", {"version": True, "metrics": []})
+    assert snapshot(cache)["status"] == "disconnected"
+
+
+@pytest.mark.parametrize("contents", ["{broken", "[]", '{"installed": []}', '{"installed": {}}',
+    '{"installed": {"auth_uri": "https://accounts.google.com/o/oauth2/v2/auth", "token_uri": "https://oauth2.googleapis.com/token"}}'])
+def test_invalid_oauth_client_configuration_is_actionable(tmp_path, monkeypatch, contents):
+    from fitdash.oauth import authenticate
+
+    client = tmp_path / "client.json"
+    client.write_text(contents)
+    browser = Mock()
+    monkeypatch.setattr("fitdash.oauth.webbrowser.open", browser)
+    vault = Mock()
+    with pytest.raises(AuthError, match=r"^invalid_client_configuration$"):
+        authenticate(client, vault, Cache(tmp_path / "state"))
+    vault.save.assert_not_called()
+    browser.assert_not_called()

@@ -8,3 +8,6 @@ client_secret*.json
 credentials*.json
 *.log
 example/
+AGENTS.md
+TODO.md
+uv

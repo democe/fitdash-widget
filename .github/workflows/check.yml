@@ -1,0 +1,29 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - name: Install Python dependencies
+        run: uv sync --locked --python 3.11
+      - name: Install Luau 0.742
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 https://github.com/luau-lang/luau/releases/download/0.742/luau-ubuntu.zip -o "$RUNNER_TEMP/luau.zip"
+          echo "152058b98c60ff1f5b5ec9bca0b8eb37793cae161dd3a05608cc3d8738ba1a4d  $RUNNER_TEMP/luau.zip" | sha256sum --check
+          unzip "$RUNNER_TEMP/luau.zip" -d "$RUNNER_TEMP/luau"
+          chmod +x "$RUNNER_TEMP/luau/luau" "$RUNNER_TEMP/luau/luau-analyze"
+          echo "$RUNNER_TEMP/luau" >> "$GITHUB_PATH"
+      - name: Lint, backend tests, Luau behavior and strict types
+        run: ./scripts/check.sh
+      - name: Build distributions
+        run: uv build

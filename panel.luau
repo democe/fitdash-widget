@@ -1,19 +1,20 @@
---!nonstrict
-local snapshot = noctalia.state.get("snapshot") or { status = "loading", metrics = {} }
-local busy = noctalia.state.get("busy") or false
+--!strict
+local initial = noctalia.state.get("snapshot")
+local snapshot: Snapshot = (if type(initial) == "table" and initial.version == 1 then initial :: Snapshot else nil) or { version = 1, status = "loading", metrics = {} }
+local busy = noctalia.state.get("busy") == true
 local confirmation = ""
 local counter = 0
-local function request(command)
+local function request(command: string)
   counter += 1
   confirmation = ""
   noctalia.state.set("request", { command = command, id = tostring(os.time()) .. ":" .. tostring(counter) })
 end
-local function label(text, props)
-  props = props or {}
-  props.text = text
-  return ui.label(props)
+local function label(text: string, props: UIProps?)
+  local options: UIProps = props or {}
+  options.text = text
+  return ui.label(options)
 end
-local function formatGoal(goal)
+local function formatGoal(goal: number?)
   if snapshot.goal == goal and snapshot.goal_text then
     return snapshot.goal_text
   end
@@ -21,7 +22,7 @@ local function formatGoal(goal)
   return tostring(math.floor(goal or 0))
 end
 local function enabledMetrics()
-  local metrics = {}
+  local metrics: {Metric} = {}
   for _, metric in ipairs(snapshot.metrics or {}) do
     if (metric.group ~= "sleep" or noctalia.getConfig("sleep"))
       and (metric.group ~= "vitals" or noctalia.getConfig("vitals")) then
@@ -59,8 +60,9 @@ local function render()
   local status = snapshot.status or "loading"
   local steps = snapshot.steps
   local goal = noctalia.getConfig("goal")
+  local divisor = type(goal) == "number" and goal > 0 and goal < math.huge and goal or 1
   local rows = {}
-  local previousGroup = ""
+  local previousGroup: string? = ""
   for _, m in ipairs(enabledMetrics()) do
     if m.group ~= previousGroup then
       previousGroup = m.group
@@ -83,15 +85,15 @@ local function render()
       onClick = function() request("refresh") end }),
     ui.button({ glyph = "settings", tooltip = noctalia.tr("settings"), onClick = function() noctalia.openSettings() end }),
   }
-  local needsAuth = status == "disconnected" or status == "reconnect_required" or # (snapshot.metrics or {}) == 0
+  local needsAuth = status == "disconnected" or status == "reconnect_required" or #(snapshot.metrics or {}) == 0
   table.insert(controls, ui.button({ text = noctalia.tr(needsAuth and "connect" or "reconnect"), enabled = not busy,
     onClick = function() request("auth") end }))
   if not needsAuth then
     table.insert(controls, ui.button({ glyph = "logout", tooltip = noctalia.tr("disconnect"), enabled = not busy,
-      onClick = function() confirmation = "disconnect" render() end }))
+      onClick = function() confirmation = "disconnect"; render() end }))
   end
   table.insert(controls, ui.button({ glyph = "trash", tooltip = noctalia.tr("clear_cache"), enabled = not busy,
-    onClick = function() confirmation = "clear-cache" render() end }))
+    onClick = function() confirmation = "clear-cache"; render() end }))
   local children = {
     ui.row({ gap = 8, align = "center" }, {
       ui.glyph({ name = "walk", color = "primary", size = 22 }),
@@ -104,7 +106,7 @@ local function render()
       label(snapshot.today_text or snapshot.today or noctalia.tr("today"), { color = "on_surface_variant", fontSize = 14 }),
       label(snapshot.steps_text or "—", { fontSize = 36, fontWeight = "bold", color = "primary" }),
       label(noctalia.tr("steps_goal") .. " " .. formatGoal(goal), { color = "on_surface_variant" }),
-      ui.progress({ progress = steps and math.clamp(steps / goal, 0, 1) or 0, height = 5, fill = "primary", track = "primary/0.15", radius = 3 }),
+      ui.progress({ progress = steps and math.clamp(steps / divisor, 0, 1) or 0, height = 5, fill = "primary", track = "primary/0.15", radius = 3 }),
     }),
     ui.scroll({ flexGrow = 1, gap = 5 }, rows),
     label(noctalia.tr("status." .. status), { color = "on_surface_variant", fontSize = 12, maxLines = 2 }),
@@ -116,7 +118,7 @@ local function render()
     table.insert(children, label(noctalia.tr(confirmation == "disconnect" and "disconnect_confirm" or "clear_cache_confirm"), { maxLines = 2 }))
     table.insert(children, ui.row({ gap = 8 }, {
       ui.button({ text = noctalia.tr(confirmation == "disconnect" and "disconnect" or "clear_cache"), variant = "destructive", onClick = function() request(confirmation) end }),
-      ui.button({ text = noctalia.tr("cancel"), onClick = function() confirmation = "" render() end }),
+      ui.button({ text = noctalia.tr("cancel"), onClick = function() confirmation = ""; render() end }),
     }))
   else
     table.insert(children, ui.row({ gap = 8 }, controls))
@@ -124,10 +126,10 @@ local function render()
   panel.render(ui.column({ flexGrow = 1, gap = 12 }, children))
 end
 noctalia.state.watch("snapshot", function(value)
-  if type(value) == "table" then snapshot = value render() end
+  if type(value) == "table" and value.version == 1 then snapshot = value :: Snapshot; render() end
 end)
-noctalia.state.watch("busy", function(value) busy = value render() end)
-function onOpen(_context)
+noctalia.state.watch("busy", function(value) busy = value == true; render() end)
+function onOpen(_context: unknown)
   render()
   request("status")
 end

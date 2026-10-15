@@ -1,16 +1,16 @@
---!nonstrict
+--!strict
 -- One backend coordinator for every bar instance and the panel.
 local busy = false
 local authorizing = false
 local authStarted = 0
 local lastSync = 0
 local lastStatus = 0
-local state = { version = 1, status = "loading", metrics = {} }
+local state: Snapshot = { version = 1, status = "loading", metrics = {} }
 local function publish()
   noctalia.state.set("snapshot", state)
   noctalia.state.set("busy", busy or authorizing)
 end
-local function arguments(command)
+local function arguments(command: string)
   return {
     noctalia.expandPath(noctalia.getConfig("backend")), command,
     "--client", noctalia.expandPath(noctalia.getConfig("client")),
@@ -23,7 +23,40 @@ local function arguments(command)
     noctalia.getConfig("vitals") and "--vitals" or "--no-vitals",
   }
 end
-local function run(command, force)
+-- Validate untyped JSON before handing it to the strictly typed renderers.
+local function validFields(value: {[string]: unknown}, strings: {string}, numbers: {string}): boolean
+  for _, key in ipairs(strings) do
+    if value[key] ~= nil and type(value[key]) ~= "string" then return false end
+  end
+  for _, key in ipairs(numbers) do
+    local n = value[key]
+    if n ~= nil and (type(n) ~= "number" or n ~= n or n < 0 or n >= math.huge) then return false end
+  end
+  return true
+end
+local function validSnapshot(value: unknown): boolean
+  if type(value) ~= "table" then return false end
+  local data = value :: {[string]: unknown}
+  if data.version ~= 1 or type(data.status) ~= "string" then return false end
+  if not validFields(data,
+    {"steps_text", "goal_text", "today", "today_text", "updated_date_text"},
+    {"steps", "goal", "updated_at"}) then return false end
+  if data.steps_stale ~= nil and type(data.steps_stale) ~= "boolean" then return false end
+  if data.metrics == nil then return data.status == "busy" end
+  if type(data.metrics) ~= "table" then return false end
+  local metrics = data.metrics :: {[unknown]: unknown}
+  local count = 0
+  for index, entry in pairs(metrics) do
+    count += 1
+    if type(index) ~= "number" or index < 1 or index % 1 ~= 0 or type(entry) ~= "table" then return false end
+    local m = entry :: {[string]: unknown}
+    if type(m.key) ~= "string" or not validFields(m,
+      {"unit", "period", "period_text", "status", "group", "display"},
+      {"value", "fetched_at"}) then return false end
+  end
+  return count == #metrics
+end
+local function run(command: string, force: boolean?)
   if busy then return end
   local argv = arguments(command)
   if force then table.insert(argv, "--force") end
@@ -33,13 +66,14 @@ local function run(command, force)
     busy = false
     if result.exitCode == 0 and not result.stdoutTruncated then
       local ok, data = pcall(noctalia.json.decode, result.stdout)
-      if ok and type(data) == "table" and data.version == 1 then
-        if data.status ~= "busy" then state = data end
-        if data.status == "authorizing" and not authorizing then
+      if ok and validSnapshot(data) then
+        local decoded = data :: Snapshot
+        if decoded.status ~= "busy" then state = decoded end
+        if decoded.status == "authorizing" and not authorizing then
           authorizing = true
           authStarted = os.time()
         end
-        if authorizing and data.status ~= "authorizing" and os.time() - authStarted > 3 then
+        if authorizing and decoded.status ~= "authorizing" and os.time() - authStarted > 3 then
           authorizing = false
           lastSync = 0
         end
@@ -57,9 +91,9 @@ local function run(command, force)
     publish()
   end
 end
-function onIpc(event, _payload)
-  if noctalia.getConfig("demo") then run("demo") return end
-  if event == "status" then run("status") return end
+function onIpc(event: string, _payload: unknown)
+  if noctalia.getConfig("demo") then run("demo"); return end
+  if event == "status" then run("status"); return end
   if busy or authorizing then return end
   if event == "auth" then
     authorizing = true
@@ -79,14 +113,14 @@ function onIpc(event, _payload)
   end
 end
 noctalia.state.watch("request", function(value)
-  if type(value) == "table" then onIpc(value.command, nil) end
+  if type(value) == "table" and type(value.command) == "string" then onIpc(value.command, nil) end
 end)
 function update()
   noctalia.setUpdateInterval(2000)
   local now = os.time()
   if busy then return end
   if noctalia.getConfig("demo") then
-    if now - lastStatus >= 10 then lastStatus = now run("demo") end
+    if now - lastStatus >= 10 then lastStatus = now; run("demo") end
   elseif authorizing then
     if now - authStarted > 330 then authorizing = false end
     run("status")

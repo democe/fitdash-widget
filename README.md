@@ -35,7 +35,7 @@ Use the **Copy summary** button beside the panel’s close button to copy the da
 - **Steps and activity:** refresh every five minutes by default; configurable from 60–3600 seconds.
 - **Sleep and vitals:** refresh every thirty minutes, or during an explicit manual refresh. Values show their observation dates. Sleep is the latest main sleep, falling back to the latest session, and displays minutes asleep rather than time in bed.
 - **Refresh:** requests fresh data, subject to a 30-second cooldown and server backoff. Reading the cloud API does not force your wearable to sync.
-- **Units and date:** use the account's units and time zone; optional metric/imperial and IANA time-zone overrides are available. The goal is a local, configurable daily step goal, initially 10,000.
+- **Units and date:** use the account's units and time zone; optional metric/imperial and IANA time-zone overrides are available. Invalid time zones show a translated settings error; clearing the override uses the account time zone. The goal is a local, configurable daily step goal, initially 10,000.
 - **Sources:** all reconciled sources by default; wearable-only and Google-source options are available. Values are not summed across overlapping devices.
 - **Offline:** show cached values with stale markers. Yesterday's steps never become today's counter. A missing measurement is shown as an em dash, not zero.
 - **Partial failures:** retain valid values when another endpoint fails. Honor quota backoff, retry transient failures on subsequent polls, and attempt at most one token refresh/retry for an unauthorized API response.
@@ -65,9 +65,12 @@ The state directory is owned by the helper rather than by Noctalia, so command-l
 uv sync --locked
 ./scripts/check.sh
 LUAU=/path/to/luau uv run python tests/check_luau.py
+LUAU_ANALYZE=/path/to/luau-analyze uv run python tests/check_luau_types.py
 ```
 
-The second command runs Python lint and fixture-based backend tests. The third runs widget, panel and service behavior checks with a real Luau VM and mocked Noctalia APIs. Obtain Luau from the [official project](https://github.com/luau-lang/luau/releases).
+The check script runs Python lint and fixture-based backend tests, plus Luau behavior and strict type checks when the corresponding tools are available. The explicit commands run each Luau check independently. Obtain `luau` and `luau-analyze` from the [official project](https://github.com/luau-lang/luau/releases).
+
+The analysis-only declarations in `types/` cover the Noctalia globals and JSON snapshot fields used by the three strict entries. The type checker prepends these declarations to each isolated entry; they are never loaded by Noctalia. Update them alongside changes to host API usage. GitHub Actions runs all checks on Python 3.11 with pinned Luau tools, then builds both distributions.
 
 ```sh
 noctalia msg panel-open democe/fitdash:details

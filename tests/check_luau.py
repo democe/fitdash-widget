@@ -1,9 +1,9 @@
 """Exercise Noctalia entry behavior in a real Luau VM with host stubs."""
 
 import os
-from pathlib import Path
 import subprocess
 import tempfile
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MOCK = r"""
@@ -14,7 +14,7 @@ local asyncCallback
 local now = 1000
 os = {time = function() return now end}
 noctalia = {
- getConfig = function(k) assert(config[k] ~= nil, k) return config[k] end,
+ getConfig = function(k) return config[k] end,
  tr = function(k) return k end,
  expandPath = function(p) return p end,
  formatTime = function(...) return "10:00" end,
@@ -47,16 +47,29 @@ CHECKS = {
     "widget.luau": r"""
 update()
 assert(tree.kind == "row")
-watches.snapshot({status="connected", steps=0, steps_text="0", today="2026-09-21"})
+watches.snapshot({version=1,status="connected", steps=0, steps_text="0", today="2026-09-21"})
 assert(tree.children[2].props.text == "0")
-watches.snapshot({status="connected", steps=0, steps_text="0", today="2026-09-21", today_text="21-09-2026"})
+watches.snapshot({version=2, status="connected", steps_text="bad"})
+assert(tree.children[2].props.text == "0")
+watches.snapshot({status="connected", steps_text="bad"})
+assert(tree.children[2].props.text == "0")
+watches.snapshot({version=1,status="connected", steps=0, steps_text="0", today="2026-09-21", today_text="21-09-2026"})
 assert(string.find(tooltip, "21-09-2026", 1, true))
 assert(not string.find(tooltip, "2026-09-21", 1, true))
-watches.snapshot({status="connected", steps=12, steps_text="12", goal=10000, goal_text="10\u{202f}000"})
+watches.snapshot({version=1,status="connected", steps=12, steps_text="12", goal=10000, goal_text="10\u{202f}000"})
 assert(string.find(tooltip, "10\u{202f}000", 1, true))
 config.goal = 12500
 update()
 assert(string.find(tooltip, "12500", 1, true))
+config.goal = 10000
+for _, goal in ipairs({0, -1, math.huge}) do
+ config.goal = goal
+ update()
+ assert(not string.find(tooltip, "inf%%"))
+end
+config.goal = nil
+update()
+assert(not string.find(tooltip, "inf%%"))
 config.goal = 10000
 values.vertical = true
 update()
@@ -68,14 +81,28 @@ assert(opened == "democe/fitdash:details")
 onOpen(nil)
 assert(tree.kind == "column")
 assert(values.request.command == "status")
-watches.snapshot({status="connected",steps=12,steps_text="12",metrics={{key="steps",value=12,display="12",period="2026-09-21",group="activity",status="available"}}})
+watches.snapshot({version=1,status="connected",steps=12,steps_text="12",metrics={{key="steps",value=12,display="12",period="2026-09-21",group="activity",status="available"}}})
 assert(tree.children[2].children[2].props.text == "12")
-watches.snapshot({status="connected", steps=12, steps_text="12", goal=10000, goal_text="10\u{202f}000", metrics={}})
+watches.snapshot({version=2, status="connected", steps_text="bad"})
+assert(tree.children[2].children[2].props.text == "12")
+watches.snapshot({status="connected", steps_text="bad"})
+assert(tree.children[2].children[2].props.text == "12")
+watches.snapshot({version=1,status="connected", steps=12, steps_text="12", goal=10000, goal_text="10\u{202f}000", metrics={}})
 assert(string.find(tree.children[2].children[3].props.text, "10\u{202f}000", 1, true))
 config.goal = 12500
 watches.busy(false)
 assert(string.find(tree.children[2].children[3].props.text, "12500", 1, true))
 config.goal = 10000
+for _, goal in ipairs({0, -1, math.huge}) do
+ config.goal = goal
+ watches.busy(false)
+ assert(tree.children[2].children[4].props.progress == 1)
+end
+config.goal = nil
+watches.busy(false)
+assert(tree.children[2].children[4].props.progress == 1)
+config.goal = 10000
+watches.busy(false)
 local controls = tree.children[#tree.children]
 controls.children[1].props.onClick()
 assert(values.request.command == "refresh")
@@ -84,7 +111,7 @@ assert(tree.children[#tree.children].children[1].props.enabled == false)
 
 config.sleep = false
 config.vitals = true
-watches.snapshot({status="connected",today="2026-09-21",today_text="21-09-2026",steps=0,steps_text="0",metrics={
+watches.snapshot({version=1,status="connected",today="2026-09-21",today_text="21-09-2026",steps=0,steps_text="0",metrics={
  {key="steps",display="0",period="2026-09-21",group="activity",status="available"},
  {key="distance",display="1.25 mi",period="2026-09-21",period_text="21-09-2026",group="activity",status="available"},
  {key="sleep",display="7 h 00 min",period="2026-09-21",group="sleep",status="available"},
@@ -107,7 +134,7 @@ assert(values.notice == "copy.success")
 values.copyFails = true
 copy.props.onClick()
 assert(values.error == "copy.failed")
-watches.snapshot({status="loading",metrics={}})
+watches.snapshot({version=1,status="loading",metrics={}})
 assert(tree.children[1].children[3].props.enabled == false)
 
 """,
@@ -120,6 +147,24 @@ assert(#processes == 1)
 values.response = {version=1,status="connected",metrics={}}
 asyncCallback({exitCode=0,stdout="json"})
 assert(values.snapshot.status == "connected")
+for _, response in ipairs({
+ {version=2,status="connected",metrics={}},
+ {status="connected",metrics={}},
+ {version=1,status=42,metrics={}},
+ {version=1,status="connected",metrics="bad"},
+ {version=1,status="connected",metrics={{key="steps",display={}}}},
+ {version=1,status="connected",metrics={},steps=math.huge},
+ {version=1,status="connected",metrics={},steps=0/0},
+}) do
+ values.response = response
+ onIpc("status", nil)
+ asyncCallback({exitCode=0,stdout="json"})
+ assert(values.snapshot.status == "backend_error")
+ assert(values.busy == false)
+end
+values.response = {version=1,status="connected",metrics={}}
+-- Reset captured launches so the remaining tests retain their numbering.
+processes = {processes[1]}
 watches.request({command="refresh", id="1"})
 assert(processes[2][2] == "sync")
 assert(processes[2][#processes[2]] == "--force")

@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 from contextlib import contextmanager
+from datetime import timedelta
 from pathlib import Path
 
 
@@ -56,8 +57,6 @@ class Cache:
 
     def merge_history(self, metrics, day, retention=7):
         """Retain only normalized daily values; backfilled corrections replace old totals."""
-        from datetime import timedelta
-
         history = self.read("history.json", {})
         cutoff = str(day - timedelta(days=retention - 1))
         history = {

@@ -67,11 +67,20 @@ class QuietHandler(WSGIRequestHandler):
 
 def authenticate(client_path, vault, cache, scopes=SCOPES):
     vault.load()  # Fail before opening the browser if keyring access is unavailable.
-    with open(client_path) as source:
-        config = json.load(source)
+    try:
+        with open(client_path) as source:
+            config = json.load(source)
+    except FileNotFoundError:
+        raise AuthError("client_missing") from None
+    except (OSError, ValueError):
+        raise AuthError("invalid_client_configuration") from None
+    if not isinstance(config, dict):
+        raise AuthError("invalid_client_configuration")
     if "installed" not in config:
         raise AuthError("desktop_client_required")
     client = config["installed"]
+    if not isinstance(client, dict):
+        raise AuthError("invalid_client_configuration")
     if (
         client.get("auth_uri") != "https://accounts.google.com/o/oauth2/auth"
         and client.get("auth_uri") != "https://accounts.google.com/o/oauth2/v2/auth"
@@ -79,14 +88,17 @@ def authenticate(client_path, vault, cache, scopes=SCOPES):
         raise AuthError("invalid_client_configuration")
     if client.get("token_uri") != "https://oauth2.googleapis.com/token":
         raise AuthError("invalid_client_configuration")
-    flow = InstalledAppFlow.from_client_config(config, scopes=scopes, autogenerate_code_verifier=True)
+    try:
+        flow = InstalledAppFlow.from_client_config(config, scopes=scopes, autogenerate_code_verifier=True)
+    except (ValueError, TypeError, KeyError):
+        raise AuthError("invalid_client_configuration") from None
     state = secrets.token_urlsafe(32)
     result = {}
     language, messages = translation_catalog()
 
     def callback(environ, start_response):
         query = urllib.parse.parse_qs(environ.get("QUERY_STRING", ""))
-        valid = environ.get("PATH_INFO") == "/" and secrets.compare_digest(query.get("state", [""])[0], state)
+        valid = environ.get("PATH_INFO") == "/" and secrets.compare_digest(query.get("state", [""])[0].encode("utf-8"), state.encode("ascii"))
         if not valid:
             start_response("400 Bad Request", [("Content-Type", "text/plain; charset=utf-8"), ("Cache-Control", "no-store")])
             return [messages["oauth.invalid_callback"].encode("utf-8")]

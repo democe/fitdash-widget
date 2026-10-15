@@ -2,15 +2,14 @@
 
 import locale
 import math
+from contextlib import suppress
 from datetime import date, datetime
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fitdash.i18n import translation_catalog
 
-try:
+with suppress(locale.Error):
     locale.setlocale(locale.LC_ALL, "")
-except locale.Error:
-    pass
 
 
 def number(value):
@@ -26,8 +25,16 @@ def civil_date(value):
     return date(int(value["year"]), int(value["month"]), int(value["day"])).isoformat()
 
 
+class InvalidTimezone(ValueError):
+    """A time zone cannot be resolved; never include the supplied value."""
+
+
 def today(timezone=""):
-    return datetime.now(ZoneInfo(timezone) if timezone else None).date()
+    try:
+        zone = ZoneInfo(timezone) if timezone else None
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        raise InvalidTimezone("invalid_timezone") from None
+    return datetime.now(zone).date()
 
 
 def format_value(value, unit, units="metric", messages=None):
@@ -100,7 +107,7 @@ def present(snapshot, now, units, current_date, interval=300, goal=10000):
     result["goal"] = number(goal)
     result["goal_text"] = format_value(result["goal"], "")
     result["goal_percent"] = (
-        int(math.floor(result["steps"] / result["goal"] * 100))
+        math.floor(result["steps"] / result["goal"] * 100)
         if result["steps"] is not None and result["goal"]
         else None
     )

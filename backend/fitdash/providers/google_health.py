@@ -44,7 +44,7 @@ class GoogleHealth:
             with requests.request(
                 "POST" if body is not None else "GET",
                 BASE + path,
-                headers={"Authorization": "Bearer " + self.token},
+                headers={"Authorization": "Bearer " + self.token, "Accept": "application/json"},
                 json=body,
                 params=params,
                 timeout=(4, 8),

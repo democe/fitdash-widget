@@ -9,3 +9,9 @@ if [[ -n "${LUAU:-}" ]] || command -v luau >/dev/null 2>&1; then
 else
   printf "%s\n" "Luau not found; set LUAU to run native Luau behavior tests."
 fi
+
+if [[ -n "${LUAU_ANALYZE:-}" ]] || command -v luau-analyze >/dev/null 2>&1; then
+  uv run --locked python tests/check_luau_types.py
+else
+  printf "%s\n" "luau-analyze not found; set LUAU_ANALYZE to run strict Luau checks."
+fi

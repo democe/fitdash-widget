@@ -6,7 +6,7 @@ author = "Shawn Reavis"
 license = "MIT"
 icon = "walk"
 description = "Your Fitbit steps and health summary, locally cached through Google Health."
-dependencies = ["python3"]
+dependencies = ["python3", "uv"]
 tags = ["health", "fitness"]
 
 [[setting]]
