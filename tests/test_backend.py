@@ -333,6 +333,22 @@ def test_disconnect_revocation_failure_persists_in_status(tmp_path, monkeypatch)
     assert status_result["status"] == "disconnected_revocation_failed"
 
 
+def test_disconnect_keyring_unavailable_does_not_report_disconnected(tmp_path, monkeypatch):
+    from fitdash.cli import execute
+
+    cache = Cache(tmp_path)
+    cache.write("snapshot.json", {"version": 1, "status": "connected", "metrics": []})
+    cache.write("auth.json", {"status": "connected"})
+    backend = Mock()
+    backend.get_password.side_effect = RuntimeError("keyring locked")
+    monkeypatch.setattr("fitdash.oauth.Keyring", Mock(return_value=backend))
+    result = execute(parser().parse_args(["disconnect", "--state-dir", str(tmp_path)]))
+    assert result["status"] == "keyring_unavailable"
+    assert cache.read("snapshot.json") is not None
+    assert cache.read("auth.json") == {"status": "connected"}
+    backend.delete_password.assert_not_called()
+
+
 def test_revoked_credentials_become_reconnect():
     from google.auth.exceptions import RefreshError
 
@@ -497,6 +513,20 @@ def test_sync_rebuilds_from_invalid_cache(tmp_path, monkeypatch):
     assert result["status"] == "connected"
     assert result["metrics"][0]["value"] == 500
     assert cache.read("snapshot.json")["status"] == "connected"
+
+
+def test_sync_auth_error_status_persists_for_status_command(tmp_path, monkeypatch):
+    from fitdash.cli import execute
+
+    cache = Cache(tmp_path)
+    cache.write("snapshot.json", {"version": 1, "status": "connected", "metrics": []})
+    cache.write("auth.json", {"status": "connected"})
+    monkeypatch.setattr("fitdash.cli.refreshed", Mock(side_effect=AuthError("reconnect_required")))
+    result = execute(parser().parse_args(["sync", "--state-dir", str(tmp_path)]))
+    assert result["status"] == "reconnect_required"
+    assert cache.read("auth.json")["status"] == "reconnect_required"
+    status_result = execute(parser().parse_args(["status", "--state-dir", str(tmp_path)]))
+    assert status_result["status"] == "reconnect_required"
 
 
 def test_history_prunes_and_replaces_corrections(tmp_path):

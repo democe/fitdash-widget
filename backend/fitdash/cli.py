@@ -239,8 +239,8 @@ def _execute(args):
                     creds = None
                     with suppress(AuthError):
                         creds = vault.load()
-                    with suppress(AuthError):
-                        vault.clear()
+                    # Credentials must be gone before reporting disconnected.
+                    vault.clear()
                     for name in ("snapshot.json", "scheduler.json", "history.json", "auth.json"):
                         cache.remove(name)
                     data = {"version": 1, "status": "disconnected", "metrics": []}
@@ -264,7 +264,7 @@ def _execute(args):
             except AuthError as error:
                 data = snapshot(cache)
                 data["status"] = str(error)
-                if args.command == "auth":
+                if args.command in ("auth", "sync"):
                     cache.write("auth.json", {"status": str(error)})
             except Exception as error:
                 # Keep cache and credentials intact; never expose exception messages.
