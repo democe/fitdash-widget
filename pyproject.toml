@@ -24,7 +24,7 @@ packages = ["backend/fitdash"]
 
 [dependency-groups]
 dev = [
-    "mypy>=1.10,<2",
+    "mypy>=1.10,<3",
     "pytest>=8,<10",
     "pytest-cov>=7.1.0",
     "ruff>=0.12,<1",
