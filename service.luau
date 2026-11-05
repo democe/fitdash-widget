@@ -1,6 +1,8 @@
 --!strict
 -- One backend coordinator for every bar instance and the panel.
 local busy = false
+local busyStarted = 0
+local currentRun = 0
 local authorizing = false
 local authStarted = 0
 local lastSync = 0
@@ -40,7 +42,7 @@ local function validSnapshot(value: unknown): boolean
   if data.version ~= 1 or type(data.status) ~= "string" then return false end
   if not validFields(data,
     {"steps_text", "goal_text", "today", "today_text", "updated_date_text"},
-    {"steps", "goal", "updated_at"}) then return false end
+    {"steps", "goal", "goal_percent", "updated_at"}) then return false end
   if data.steps_stale ~= nil and type(data.steps_stale) ~= "boolean" then return false end
   if data.metrics == nil then return data.status == "busy" end
   if type(data.metrics) ~= "table" then return false end
@@ -61,12 +63,16 @@ local function run(command: string, force: boolean?)
   local argv = arguments(command)
   if force then table.insert(argv, "--force") end
   busy = true
+  busyStarted = os.time()
+  currentRun += 1
+  local runId = currentRun
   publish()
-  local launched = noctalia.runAsync(argv, function(result)
+  local ok, launched = pcall(noctalia.runAsync, argv, function(result)
+    if runId ~= currentRun then return end
     busy = false
     if result.exitCode == 0 and not result.stdoutTruncated then
-      local ok, data = pcall(noctalia.json.decode, result.stdout)
-      if ok and validSnapshot(data) then
+      local decodeOk, data = pcall(noctalia.json.decode, result.stdout)
+      if decodeOk and validSnapshot(data) then
         local decoded = data :: Snapshot
         if decoded.status ~= "busy" then state = decoded end
         if decoded.status == "authorizing" and not authorizing then
@@ -85,28 +91,38 @@ local function run(command: string, force: boolean?)
     end
     publish()
   end)
-  if not launched then
+  if not ok or not launched then
     busy = false
     state.status = "backend_missing"
     publish()
   end
 end
 function onIpc(event: string, _payload: unknown)
-  if noctalia.getConfig("demo") then run("demo"); return end
-  if event == "status" then run("status"); return end
+  if event == "status" then
+    run(if noctalia.getConfig("demo") then "demo" else "status")
+    return
+  end
   if busy or authorizing then return end
   if event == "auth" then
     authorizing = true
     authStarted = os.time()
+    lastStatus = 0
     state.status = "authorizing"
-    if not noctalia.runAsync(arguments("auth")) then
+    local ok, launched = pcall(function()
+      return noctalia.runAsync(arguments("auth"))
+    end)
+    if not ok or not launched then
       authorizing = false
       state.status = "backend_missing"
     end
     publish()
   elseif event == "refresh" then
     lastSync = os.time()
-    run("sync", true)
+    if noctalia.getConfig("demo") then
+      run("demo")
+    else
+      run("sync", true)
+    end
   elseif event == "disconnect" or event == "clear-cache" then
     lastSync = os.time()
     run(event)
@@ -118,19 +134,30 @@ end)
 function update()
   noctalia.setUpdateInterval(2000)
   local now = os.time()
-  if busy then return end
+  if busy then
+    if now - busyStarted > 45 then
+      busy = false
+      currentRun += 1
+      state.status = "backend_error"
+      publish()
+    end
+    return
+  end
   if noctalia.getConfig("demo") then
     if now - lastStatus >= 10 then lastStatus = now; run("demo") end
   elseif authorizing then
     if now - authStarted > 330 then authorizing = false end
-    run("status")
+    if now - lastStatus >= 5 then
+      lastStatus = now
+      run("status")
+    end
   elseif lastStatus == 0 then
     lastStatus = now
     run("status")
   elseif now - lastSync >= noctalia.getConfig("interval") then
     lastSync = now
     run("sync")
-  elseif now - lastStatus >= 60 then
+  elseif now - lastStatus >= 180 then
     lastStatus = now
     run("status")
   end

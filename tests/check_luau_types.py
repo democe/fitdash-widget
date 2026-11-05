@@ -16,7 +16,12 @@ def check_types(binary):
             source = (ROOT / entry).read_text()
             assert source.startswith("--!strict\n"), f"{entry} must use strict mode"
             script = Path(directory) / entry
-            script.write_text("--!strict\n--!nolint LocalUnused\n--!nolint FunctionUnused\n" + stubs + "\n" + source.removeprefix("--!strict\n"))
+            script.write_text(
+                "--!strict\n--!nolint LocalUnused\n--!nolint FunctionUnused\n"
+                + stubs
+                + "\n"
+                + source.removeprefix("--!strict\n")
+            )
             subprocess.run([binary, str(script)], check=True)
             print(entry + ": types passed")
 

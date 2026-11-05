@@ -1,5 +1,7 @@
 """Read-only Google Health v4 adapter, based on the discovery schema."""
 
+import email.utils
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
@@ -33,6 +35,20 @@ class ApiError(Exception):
         self.status, self.retry_after = status, retry_after
 
 
+def parse_retry_after(header):
+    if not header:
+        return 0
+    header = str(header).strip()
+    if header.isdigit():
+        return min(86400, max(0, int(header)))
+    try:
+        dt = email.utils.parsedate_to_datetime(header)
+        delay = int(dt.timestamp() - time.time())
+        return min(86400, max(0, delay))
+    except (ValueError, TypeError, OverflowError):
+        return 0
+
+
 class GoogleHealth:
     def __init__(self, token, scopes, source="all-sources"):
         self.token = token
@@ -51,8 +67,9 @@ class GoogleHealth:
                 stream=True,
             ) as response:
                 if response.status_code != 200:
-                    retry = response.headers.get("Retry-After", "0")
-                    raise ApiError(response.status_code, min(86400, int(retry)) if retry.isdigit() else 0)
+                    raise ApiError(
+                        response.status_code, parse_retry_after(response.headers.get("Retry-After"))
+                    )
                 chunks, size = [], 0
                 for chunk in response.iter_content(65536):
                     size += len(chunk)

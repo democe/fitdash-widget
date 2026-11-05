@@ -24,7 +24,7 @@ class Cache:
             path = self.directory / name
             if path.stat().st_size > 2_000_000:
                 return default
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else default
         except (OSError, ValueError):
             return default
@@ -32,11 +32,16 @@ class Cache:
     def write(self, name, data):
         fd, tmp = tempfile.mkstemp(dir=self.directory, prefix=".write-")
         try:
-            with os.fdopen(fd, "w") as out:
+            with os.fdopen(fd, "w", encoding="utf-8") as out:
                 json.dump(data, out, ensure_ascii=False, allow_nan=False)
                 out.flush()
                 os.fsync(out.fileno())
             os.replace(tmp, self.directory / name)
+            dir_fd = os.open(self.directory, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
         finally:
             Path(tmp).unlink(missing_ok=True)
 

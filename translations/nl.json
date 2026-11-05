@@ -48,6 +48,7 @@
   "metric_status.rate_limited": "Wachten op nieuwe poging",
   "metric_status.invalid_response": "Onverwacht antwoord",
   "metric_status.reconnect_required": "Opnieuw koppelen vereist",
+  "status.invalid_argument": "Ongeldige instelling of opdrachtparameter.",
   "status.invalid_timezone": "Ongeldige tijdzone. Kies een IANA-tijdzone of laat de instelling leeg om die van je account te gebruiken.",
   "status.loading": "Je overzicht wordt geladen…",
   "status.connected": "Gekoppeld · Google Health",

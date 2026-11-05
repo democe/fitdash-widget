@@ -56,9 +56,25 @@ def test_midnight_does_not_display_yesterday_steps_as_today():
     assert old["metrics"][0]["status"] == "available"
 
 
+def test_observation_age_marks_vitals_and_sleep_stale():
+    snap = {
+        "metrics": [
+            metric("resting-heart-rate", 60, period="2026-09-17", group="vitals", fetched_at=100),
+            metric("sleep", 420, "sleep_min", period="2026-09-19", group="sleep", fetched_at=100),
+            metric("spo2", 98, "%", period="2026-09-20", group="vitals", fetched_at=100),
+        ]
+    }
+    res = present(snap, 101, "metric", "2026-09-21")
+    assert res["metrics"][0]["status"] == "stale"
+    assert res["metrics"][1]["status"] == "stale"
+    assert res["metrics"][2]["status"] == "available"
+
+
 def test_units_and_missing_values(monkeypatch):
     monkeypatch.setenv("LC_ALL", "C")
-    monkeypatch.setattr("locale.localeconv", lambda: {"decimal_point": ".", "thousands_sep": "", "grouping": []})
+    monkeypatch.setattr(
+        "locale.localeconv", lambda: {"decimal_point": ".", "thousands_sep": "", "grouping": []}
+    )
     assert format_value(1609344, "mm", "imperial").endswith("1.00 mi")
     assert format_value(462, "sleep_min") == "7 h 42 min"
     assert format_value(None, "") == "—"
@@ -66,9 +82,14 @@ def test_units_and_missing_values(monkeypatch):
         metric("steps", float("nan"))
 
 
-@pytest.mark.parametrize("separator,grouping,expected", [("", [], "10000"), (",", [3, 0], "10,000"), (".", [3, 0], "10.000"), ("\u202f", [3, 0], "10\u202f000")])
+@pytest.mark.parametrize(
+    "separator,grouping,expected",
+    [("", [], "10000"), (",", [3, 0], "10,000"), (".", [3, 0], "10.000"), ("\u202f", [3, 0], "10\u202f000")],
+)
 def test_goal_formatting_and_progress(monkeypatch, separator, grouping, expected):
-    monkeypatch.setattr("locale.localeconv", lambda: {"decimal_point": ".", "thousands_sep": separator, "grouping": grouping})
+    monkeypatch.setattr(
+        "locale.localeconv", lambda: {"decimal_point": ".", "thousands_sep": separator, "grouping": grouping}
+    )
     snap = {"metrics": [metric("steps", 8432, period="2026-09-21", group="activity")]}
     res = present(snap, 100, "metric", "2026-09-21", goal=10000)
     assert res["goal"] == 10000
@@ -77,6 +98,32 @@ def test_goal_formatting_and_progress(monkeypatch, separator, grouping, expected
 
     args = parser().parse_args(["status", "--goal", "12500"])
     assert args.goal == 12500
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["status", "--goal", "-5"],
+        ["status", "--goal", "0"],
+        ["status", "--goal", "100001"],
+        ["status", "--goal", "abc"],
+        ["status", "--interval", "59"],
+        ["status", "--interval", "3601"],
+        ["status", "--interval", "xyz"],
+        ["nonexistent-command"],
+    ],
+)
+def test_cli_numeric_bounds_and_invalid_arguments(capsys, args):
+    from fitdash.cli import ArgumentError, main
+
+    with pytest.raises(ArgumentError):
+        parser().parse_args(args)
+
+    main(args)
+    out = json.loads(capsys.readouterr().out)
+    assert out["version"] == 1
+    assert out["status"] == "invalid_argument"
+    assert out["metrics"] == []
 
 
 def test_private_atomic_cache_and_corruption(tmp_path):
@@ -88,6 +135,13 @@ def test_private_atomic_cache_and_corruption(tmp_path):
     (cache.directory / "snapshot.json").write_text("{broken")
     assert cache.read("snapshot.json", {}) == {}
     assert not list(cache.directory.glob(".write-*"))
+
+
+def test_cache_encoding_preserves_utf8_independent_of_locale(tmp_path):
+    cache = Cache(tmp_path / "state")
+    test_data = {"text": "Étapes d’activité — 10\u202f000", "symbols": "€ 🏃 😴"}  # noqa: RUF001
+    cache.write("unicode.json", test_data)
+    assert cache.read("unicode.json") == test_data
 
 
 def test_operation_lock_prevents_overlap(tmp_path):
@@ -139,6 +193,35 @@ def test_api_error_is_per_metric():
     assert all(m["status"] == "rate_limited" and m["retry_after"] == 123 for m in result)
 
 
+@pytest.mark.parametrize(
+    "header,expected",
+    [
+        ("120", 120),
+        ("0", 0),
+        ("-5", 0),
+        ("999999", 86400),
+        ("not-a-date", 0),
+        (None, 0),
+    ],
+)
+def test_parse_retry_after_seconds_and_invalid(header, expected):
+    from fitdash.providers.google_health import parse_retry_after
+
+    assert parse_retry_after(header) == expected
+
+
+def test_parse_retry_after_http_date(monkeypatch):
+    import time
+
+    from fitdash.providers.google_health import parse_retry_after
+
+    monkeypatch.setattr("fitdash.providers.google_health.time.time", lambda: 1000.0)
+    future_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(1120.0))
+    assert parse_retry_after(future_date) == 120
+    past_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(900.0))
+    assert parse_retry_after(past_date) == 0
+
+
 def test_transient_error_preserves_prior_value_and_backs_off(tmp_path, monkeypatch):
     cache = Cache(tmp_path)
     cache.write(
@@ -184,6 +267,70 @@ def test_vault_saves_actual_granted_scopes(monkeypatch):
     credentials.to_json.return_value = json.dumps({"scopes": ["activity", "sleep"]})
     Vault("test").save(credentials)
     assert json.loads(backend.set_password.call_args.args[2])["scopes"] == ["activity"]
+
+
+@pytest.mark.parametrize("corrupt", ["{bad json", "123", "{}", '{"token": "xyz"}'])
+def test_vault_corrupted_credentials_returns_none(monkeypatch, corrupt):
+    backend = Mock()
+    backend.get_password.return_value = corrupt
+    monkeypatch.setattr("fitdash.oauth.Keyring", Mock(return_value=backend))
+    assert Vault("test").load() is None
+
+
+def test_vault_keyring_exception_raises_keyring_unavailable(monkeypatch):
+    backend = Mock()
+    backend.get_password.side_effect = RuntimeError("keyring locked")
+    monkeypatch.setattr("fitdash.oauth.Keyring", Mock(return_value=backend))
+    with pytest.raises(AuthError, match=r"^keyring_unavailable$"):
+        Vault("test").load()
+
+
+def test_disconnect_clears_cache_even_with_corrupt_keyring_or_error(tmp_path, monkeypatch):
+    from fitdash.cli import execute
+
+    cache = Cache(tmp_path)
+    cache.write("snapshot.json", {"version": 1, "metrics": []})
+    cache.write("history.json", {"2026-09-20": {}})
+    cache.write("auth.json", {"status": "connected"})
+    backend = Mock()
+    backend.get_password.return_value = "{bad json"
+    monkeypatch.setattr("fitdash.oauth.Keyring", Mock(return_value=backend))
+    result = execute(parser().parse_args(["disconnect", "--state-dir", str(tmp_path)]))
+    assert result["status"] == "disconnected"
+    assert cache.read("snapshot.json") is None
+    assert cache.read("history.json") is None
+    assert cache.read("auth.json") is None
+    backend.delete_password.assert_called_once()
+
+
+def test_disconnect_successful_revocation(tmp_path, monkeypatch):
+    from fitdash.cli import execute
+
+    creds = Mock(token="test-token", refresh_token="test-refresh")
+    monkeypatch.setattr("fitdash.cli.Vault.load", Mock(return_value=creds))
+    monkeypatch.setattr("fitdash.cli.Vault.clear", Mock())
+    post = Mock(return_value=Mock(status_code=200))
+    monkeypatch.setattr("requests.post", post)
+    result = execute(parser().parse_args(["disconnect", "--state-dir", str(tmp_path)]))
+    assert result["status"] == "disconnected"
+    post.assert_called_once_with(
+        "https://oauth2.googleapis.com/revoke",
+        data={"token": "test-refresh"},
+        timeout=10,
+    )
+
+
+def test_disconnect_revocation_failure_persists_in_status(tmp_path, monkeypatch):
+    from fitdash.cli import execute
+
+    creds = Mock(token="test-token", refresh_token="test-refresh")
+    monkeypatch.setattr("fitdash.cli.Vault.load", Mock(return_value=creds))
+    monkeypatch.setattr("fitdash.cli.Vault.clear", Mock())
+    monkeypatch.setattr("requests.post", Mock(return_value=Mock(status_code=500)))
+    result = execute(parser().parse_args(["disconnect", "--state-dir", str(tmp_path)]))
+    assert result["status"] == "disconnected_revocation_failed"
+    status_result = execute(parser().parse_args(["status", "--state-dir", str(tmp_path)]))
+    assert status_result["status"] == "disconnected_revocation_failed"
 
 
 def test_revoked_credentials_become_reconnect():
@@ -309,9 +456,11 @@ def test_oauth_denied_does_not_replace_credentials(tmp_path, monkeypatch):
     responses = []
 
     def make(_host, _port, app, **_kwargs):
-        server.handle_request.side_effect = lambda: responses.extend(app(
-            {"PATH_INFO": "/", "QUERY_STRING": "state=" + state["state"] + "&error=access_denied"}, Mock()
-        ))
+        server.handle_request.side_effect = lambda: responses.extend(
+            app(
+                {"PATH_INFO": "/", "QUERY_STRING": "state=" + state["state"] + "&error=access_denied"}, Mock()
+            )
+        )
         return server
 
     monkeypatch.setattr("fitdash.oauth.make_server", make)
@@ -331,6 +480,25 @@ def test_corrupt_snapshot_schema_recovers(tmp_path):
     assert snapshot(cache)["status"] == "invalid_cache"
 
 
+def test_sync_rebuilds_from_invalid_cache(tmp_path, monkeypatch):
+    from fitdash.cli import snapshot
+
+    cache = Cache(tmp_path)
+    cache.write("snapshot.json", {"version": 1, "metrics": [{"key": "steps", "value": "garbage"}]})
+    assert snapshot(cache)["status"] == "invalid_cache"
+
+    client = Mock()
+    client.settings.return_value = {}
+    client.collect.return_value = [metric("steps", 500, period="2026-09-21", group="activity")]
+    monkeypatch.setattr("fitdash.cli.GoogleHealth", Mock(return_value=client))
+    monkeypatch.setattr("fitdash.cli.refreshed", Mock(return_value=Mock(token="fake", scopes=[])))
+
+    result = sync(cache, Mock(), parser().parse_args(["sync"]))
+    assert result["status"] == "connected"
+    assert result["metrics"][0]["value"] == 500
+    assert cache.read("snapshot.json")["status"] == "connected"
+
+
 def test_history_prunes_and_replaces_corrections(tmp_path):
     cache = Cache(tmp_path)
     cache.write("history.json", {"2026-09-01": {"steps": 100}, "2026-09-20": {"steps": {"value": 900}}})
@@ -340,6 +508,18 @@ def test_history_prunes_and_replaces_corrections(tmp_path):
     assert history["2026-09-20"]["steps"]["value"] == 800
     cache.clear_health()
     assert cache.read("history.json") is None
+
+
+def test_history_command(tmp_path, monkeypatch):
+    from fitdash.cli import execute
+
+    cache = Cache(tmp_path)
+    cache.write("history.json", {"2026-09-20": {"steps": {"value": 8000}}})
+    monkeypatch.setattr("fitdash.cli.Vault.load", Mock(return_value=Mock()))
+    result = execute(parser().parse_args(["history", "--state-dir", str(tmp_path)]))
+    assert result["version"] == 1
+    assert result["status"] == "connected"
+    assert result["history"]["2026-09-20"]["steps"]["value"] == 8000
 
 
 def test_recent_days_backfill_is_separate_from_today():
@@ -408,13 +588,26 @@ def test_translations_key_parity():
         assert set(data.keys()) == set(en.keys()), f"Key mismatch in {lang_file.name}"
 
 
-@pytest.mark.parametrize("environment,expected", [
-    ({"LANG": "fr_CA.UTF-8"}, "fr"),
-    ({"LANG": "en_US.UTF-8", "LC_MESSAGES": "fr_FR.UTF-8"}, "fr"),
-    ({"LC_ALL": "C", "LANGUAGE": "fr"}, "en"),
-    ({"LC_ALL": "en_US.UTF-8", "LANGUAGE": "zz:fr:en"}, "fr"),
-    ({"LANG": "../../fr"}, "en"),
-])
+def test_manifest_versions_match():
+    import tomllib
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    plugin = tomllib.loads((root / "plugin.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["version"] == plugin["version"]
+
+
+@pytest.mark.parametrize(
+    "environment,expected",
+    [
+        ({"LANG": "fr_CA.UTF-8"}, "fr"),
+        ({"LANG": "en_US.UTF-8", "LC_MESSAGES": "fr_FR.UTF-8"}, "fr"),
+        ({"LC_ALL": "C", "LANGUAGE": "fr"}, "en"),
+        ({"LC_ALL": "en_US.UTF-8", "LANGUAGE": "zz:fr:en"}, "fr"),
+        ({"LANG": "../../fr"}, "en"),
+    ],
+)
 def test_callback_locale_selection(monkeypatch, environment, expected):
     from fitdash.i18n import translation_catalog
 
@@ -431,15 +624,25 @@ def test_callback_locale_selection(monkeypatch, environment, expected):
 def test_localized_unit_presentation(monkeypatch, language, hour):
     monkeypatch.setenv("LC_ALL", language + "_XX.UTF-8")
     monkeypatch.delenv("LANGUAGE", raising=False)
-    monkeypatch.setattr("locale.localeconv", lambda: {
-        "decimal_point": ",", "thousands_sep": ".", "grouping": [3, 0],
-    })
+    monkeypatch.setattr(
+        "locale.localeconv",
+        lambda: {
+            "decimal_point": ",",
+            "thousands_sep": ".",
+            "grouping": [3, 0],
+        },
+    )
     assert format_value(1609344, "mm", "imperial") == "1,00 mi"
     assert format_value(1000000, "mm") == "1,00 km"
     assert format_value(462, "sleep_min") == f"7 {hour} 42 min"
     assert format_value(420, "sleep_min") == f"7 {hour} 00 min"
-    for unit, expected in [("kcal", "12 kcal"), ("bpm", "12 bpm"),
-                           ("ms", "12,0 ms"), ("%", "12,0 %"), ("min", "12 min")]:
+    for unit, expected in [
+        ("kcal", "12 kcal"),
+        ("bpm", "12 bpm"),
+        ("ms", "12,0 ms"),
+        ("%", "12,0 %"),
+        ("min", "12 min"),
+    ]:
         assert format_value(12, unit) == expected
     assert format_value(0, "bpm") == "0 bpm"
     assert format_value(None, "bpm") == "—"
@@ -471,9 +674,14 @@ def test_translation_format_placeholders():
             assert fields == expected, (path.name, key)
 
 
-@pytest.mark.parametrize("language,expected", [
-    ("en", "09/22/2026"), ("fr", "22/09/2026"), ("nl", "22-09-2026"),
-])
+@pytest.mark.parametrize(
+    "language,expected",
+    [
+        ("en", "09/22/2026"),
+        ("fr", "22/09/2026"),
+        ("nl", "22-09-2026"),
+    ],
+)
 def test_localized_dates_preserve_civil_dates(monkeypatch, language, expected):
     from datetime import datetime
 
@@ -484,10 +692,13 @@ def test_localized_dates_preserve_civil_dates(monkeypatch, language, expected):
     monkeypatch.delenv("LANGUAGE", raising=False)
     _, messages = translation_catalog()
     stamp = datetime(2026, 9, 22, 12).timestamp()
-    snap = {"updated_at": stamp, "metrics": [
-        metric("steps", 123, period="2026-09-22", group="activity", fetched_at=stamp),
-        metric("sleep", 400, "sleep_min", period="2026-09-21"),
-    ]}
+    snap = {
+        "updated_at": stamp,
+        "metrics": [
+            metric("steps", 123, period="2026-09-22", group="activity", fetched_at=stamp),
+            metric("sleep", 400, "sleep_min", period="2026-09-21"),
+        ],
+    }
     result = present(snap, stamp, "metric", "2026-09-22")
     assert result["today_text"] == expected
     assert result["updated_date_text"] == expected
@@ -530,10 +741,28 @@ def test_invalid_account_timezone_preserves_cache(tmp_path, monkeypatch):
     assert (tmp_path / "snapshot.json").read_bytes() == before
 
 
+def test_sync_transient_error_preserves_snapshot_on_disk(tmp_path, monkeypatch):
+    from fitdash.cli import execute
+
+    cache = Cache(tmp_path)
+    initial_snapshot = {
+        "version": 1,
+        "status": "connected",
+        "metrics": [metric("steps", 1000, period="2026-09-21")],
+    }
+    cache.write("snapshot.json", initial_snapshot)
+    monkeypatch.setattr("fitdash.cli.refreshed", Mock(side_effect=AuthError("offline")))
+    result = execute(parser().parse_args(["sync", "--state-dir", str(tmp_path)]))
+    assert result["status"] == "offline"
+    assert cache.read("snapshot.json")["status"] == "connected"
+
+
 def test_clear_cache_works_with_invalid_timezone(tmp_path):
     from fitdash.cli import execute
 
-    result = execute(parser().parse_args(["clear-cache", "--state-dir", str(tmp_path), "--timezone", "Bad/Zone"]))
+    result = execute(
+        parser().parse_args(["clear-cache", "--state-dir", str(tmp_path), "--timezone", "Bad/Zone"])
+    )
     assert result["status"] == "cache_cleared"
 
 
@@ -550,14 +779,17 @@ def test_api_requests_accept_json(monkeypatch, body):
     assert request.call_args.args[0] == ("GET" if body is None else "POST")
 
 
-@pytest.mark.parametrize("change", [
-    {"settings": {"_fetched_at": "garbage"}},
-    {"settings": {"_fetched_at": None}},
-    {"settings": {"_fetched_at": True}},
-    {"settings": {"timeZone": []}},
-    {"settings": {"distanceUnit": {}}},
-    {"updated_at": 1e100},
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"settings": {"_fetched_at": "garbage"}},
+        {"settings": {"_fetched_at": None}},
+        {"settings": {"_fetched_at": True}},
+        {"settings": {"timeZone": []}},
+        {"settings": {"distanceUnit": {}}},
+        {"updated_at": 1e100},
+    ],
+)
 def test_corrupt_cached_settings_and_timestamps_are_rejected(tmp_path, change):
     from fitdash.cli import execute, snapshot
 
@@ -575,8 +807,16 @@ def test_boolean_is_not_a_snapshot_version(tmp_path):
     assert snapshot(cache)["status"] == "disconnected"
 
 
-@pytest.mark.parametrize("contents", ["{broken", "[]", '{"installed": []}', '{"installed": {}}',
-    '{"installed": {"auth_uri": "https://accounts.google.com/o/oauth2/v2/auth", "token_uri": "https://oauth2.googleapis.com/token"}}'])
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "{broken",
+        "[]",
+        '{"installed": []}',
+        '{"installed": {}}',
+        '{"installed": {"auth_uri": "https://accounts.google.com/o/oauth2/v2/auth", "token_uri": "https://oauth2.googleapis.com/token"}}',
+    ],
+)
 def test_invalid_oauth_client_configuration_is_actionable(tmp_path, monkeypatch, contents):
     from fitdash.oauth import authenticate
 

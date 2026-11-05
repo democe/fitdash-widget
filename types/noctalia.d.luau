@@ -6,7 +6,8 @@ type Metric = {
 type Snapshot = {
   version: number?, status: string?, metrics: {Metric}?, steps: number?,
   steps_text: string?, steps_stale: boolean?, goal: number?, goal_text: string?,
-  today: string?, today_text: string?, updated_at: number?, updated_date_text: string?,
+  goal_percent: number?, today: string?, today_text: string?, updated_at: number?,
+  updated_date_text: string?,
 }
 type ProcessResult = { exitCode: number, stdout: string, stdoutTruncated: boolean? }
 type GetConfig = (("goal") -> number?)

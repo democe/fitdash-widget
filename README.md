@@ -43,7 +43,7 @@ Use the **Copy summary** button beside the panel’s close button to copy the da
 - **Disconnect:** removes local credentials and health data, then attempts Google revocation. If revocation fails, the panel reports that local disconnection succeeded and Google account access still needs removing.
 - **Demo:** shows synthetic values without requesting health data. Useful for layout work.
 
-A single Noctalia service feeds every widget instance, so adding a widget to another bar does not multiply API polling. File locks serialize auth, sync, and disconnect. Reconnecting clears prior account data before new readings are cached.
+A single Noctalia service feeds every widget instance, so adding a widget to another bar does not multiply API polling. Background cache status polling runs at a relaxed 180-second cadence to reduce idle process wakeups, while opening the details panel requests an immediate status update. File locks serialize auth, sync, and disconnect. Reconnecting clears prior account data before new readings are cached.
 
 ## Local files
 
@@ -78,7 +78,7 @@ noctalia msg plugin democe/fitdash:sync all refresh
 noctalia msg plugin democe/fitdash:sync all status
 ```
 
-The backend CLI supports `status`, `sync`, `auth`, `disconnect`, `clear-cache`, and `demo`. Commands return one JSON response. **Status/sync output contains your health measurements**; avoid pasting it into public logs. Error responses contain fixed status codes, never upstream error messages. A cached status read does not contact Google or unlock the keyring.
+The backend CLI supports `status`, `sync`, `auth`, `disconnect`, `clear-cache`, `demo`, and `history`. Commands return one JSON response. **Status/sync output contains your health measurements**; avoid pasting it into public logs. Error responses contain fixed status codes, never upstream error messages. A cached status read does not contact Google or unlock the keyring.
 
 ```sh
 ~/.local/share/fitdash-widget/venv/bin/fitdash status
@@ -91,13 +91,13 @@ Architecture: `service.luau` owns polling and publishes sanitized snapshots; `wi
 
 ## Remove
 
-Use **Disconnect** first if you want to revoke access and erase local credentials/data. Disable the plugin with:
+Use **Disconnect** first if you want to revoke access and erase local credentials/data. To automatically remove the plugin link and backend environment:
 
 ```sh
-noctalia msg plugins disable democe/fitdash
+./scripts/uninstall.sh
 ```
 
-Remove the FitDash widget from your bar settings, then remove the FitDash symlink and backend environment if no longer wanted. The client JSON is separate and may be removed independently. Do not restore an old complete Noctalia settings backup over newer unrelated changes; remove only the FitDash entry.
+Pass `--purge` to also delete cached health data from `$XDG_STATE_HOME`. Remove the FitDash widget from your bar settings. The OAuth client JSON is separate and may be removed independently. Do not restore an old complete Noctalia settings backup over newer unrelated changes; remove only the FitDash entry.
 
 ## Validation and scope
 

@@ -10,12 +10,16 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - name: Install Python dependencies
-        run: uv sync --locked --python 3.11
+        run: uv sync --locked --python ${{ matrix.python-version }}
       - name: Install Luau 0.742
+        if: matrix.python-version == '3.11'
         shell: bash
         run: |
           curl --fail --location --retry 3 https://github.com/luau-lang/luau/releases/download/0.742/luau-ubuntu.zip -o "$RUNNER_TEMP/luau.zip"
@@ -24,6 +28,23 @@ jobs:
           chmod +x "$RUNNER_TEMP/luau/luau" "$RUNNER_TEMP/luau/luau-analyze"
           echo "$RUNNER_TEMP/luau" >> "$GITHUB_PATH"
       - name: Lint, backend tests, Luau behavior and strict types
+        if: matrix.python-version == '3.11'
         run: ./scripts/check.sh
-      - name: Build distributions
-        run: uv build
+      - name: Lint and backend tests
+        if: matrix.python-version != '3.11'
+        run: |
+          uv run --locked ruff format --check .
+          uv run --locked ruff check backend tests
+          uv run --locked mypy backend
+          uv run --locked pytest -q
+      - name: Build distributions and smoke test
+        if: matrix.python-version == '3.11'
+        run: |
+          uv build
+          uv run --isolated --with dist/*.whl fitdash status --state-dir "$RUNNER_TEMP/smoke-state"
+      - name: Upload distributions
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: dist
+          path: dist/

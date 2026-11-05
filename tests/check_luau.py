@@ -136,7 +136,20 @@ copy.props.onClick()
 assert(values.error == "copy.failed")
 watches.snapshot({version=1,status="loading",metrics={}})
 assert(tree.children[1].children[3].props.enabled == false)
-
+watches.snapshot({version=1,status="cache_cleared",metrics={}})
+local clearedControls = tree.children[#tree.children].children
+assert(clearedControls[3].props.text == "reconnect")
+assert(clearedControls[4].props.glyph == "logout")
+watches.snapshot({version=1,status="disconnected",metrics={}})
+local disconnectedControls = tree.children[#tree.children].children
+assert(disconnectedControls[3].props.text == "connect")
+assert(disconnectedControls[4].props.glyph == "trash")
+watches.snapshot({version=1,status="connected",metrics={
+ {key="steps",display="10|000\nsteps",period="2026-09-21",group="activity",status="available"},
+}})
+values.copyFails = false
+copy.props.onClick()
+assert(string.find(values.clipboard, "| metric.steps | 10\\|000 steps | 2026-09-21 | metric_status.available |", 1, true))
 """,
     "service.luau": r"""
 update()
@@ -174,6 +187,66 @@ asyncCallback({exitCode=0,stdout="json"})
 onIpc("auth", nil)
 assert(processes[3][2] == "auth")
 assert(values.busy == true)
+-- Finish authorizing by running status with connected status after 4 seconds
+now = now + 4
+onIpc("status", nil)
+values.response = {version=1,status="connected",metrics={}}
+asyncCallback({exitCode=0,stdout="json"})
+assert(values.busy == false)
+-- Demo mode should only substitute demo for status and refresh, not swallow auth/disconnect/clear-cache
+config.demo = true
+processes = {}
+onIpc("status", nil)
+assert(processes[1][2] == "demo")
+asyncCallback({exitCode=0,stdout="json"})
+onIpc("refresh", nil)
+assert(processes[2][2] == "demo")
+asyncCallback({exitCode=0,stdout="json"})
+onIpc("disconnect", nil)
+assert(processes[3][2] == "disconnect")
+asyncCallback({exitCode=0,stdout="json"})
+onIpc("clear-cache", nil)
+assert(processes[4][2] == "clear-cache")
+asyncCallback({exitCode=0,stdout="json"})
+onIpc("auth", nil)
+assert(processes[5][2] == "auth")
+-- Finish authorizing again
+now = now + 4
+onIpc("status", nil)
+values.response = {version=1,status="connected",metrics={}}
+asyncCallback({exitCode=0,stdout="json"})
+assert(values.busy == false)
+config.demo = false
+-- Watchdog clears busy when backend hangs past timeout
+onIpc("refresh", nil)
+assert(values.busy == true)
+local hungCallback = asyncCallback
+now = now + 10
+update()
+assert(values.busy == true)
+now = now + 40
+update()
+assert(values.busy == false)
+assert(values.snapshot.status == "backend_error")
+-- Late callback from timed-out run should be ignored
+values.response = {version=1,status="connected",metrics={}}
+hungCallback({exitCode=0,stdout="json"})
+assert(values.snapshot.status == "backend_error")
+-- Authorizing should throttle status polls to 5 seconds
+onIpc("auth", nil)
+processes = {}
+asyncCallback = nil
+update()
+assert(#processes == 1)
+assert(processes[1][2] == "status")
+if asyncCallback then asyncCallback({exitCode=0,stdout="json"}) end
+now = now + 2
+update()
+assert(#processes == 1)
+now = now + 3
+update()
+assert(#processes == 2)
+assert(processes[2][2] == "status")
 """,
 }
 

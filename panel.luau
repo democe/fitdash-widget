@@ -31,6 +31,9 @@ local function enabledMetrics()
   end
   return metrics
 end
+local function copyCell(text: string): string
+  return (string.gsub(string.gsub(text, "[\r\n]+", " "), "|", "\\|"))
+end
 local function copySummary()
   local lines = {
     noctalia.tr("title"),
@@ -38,13 +41,20 @@ local function copySummary()
     noctalia.tr("metric.steps") .. ": " .. (snapshot.steps_text or "—"),
     noctalia.tr("settings.goal") .. ": " .. formatGoal(noctalia.getConfig("goal")),
     "",
-    "| " .. table.concat({ noctalia.tr("copy.metric"), noctalia.tr("copy.value"), noctalia.tr("copy.date"), noctalia.tr("copy.status") }, " | ") .. " |",
+    "| " .. table.concat({
+      copyCell(noctalia.tr("copy.metric")),
+      copyCell(noctalia.tr("copy.value")),
+      copyCell(noctalia.tr("copy.date")),
+      copyCell(noctalia.tr("copy.status")),
+    }, " | ") .. " |",
     "| ----- | ----- | ----- | ----- |",
   }
   for _, metric in ipairs(enabledMetrics()) do
     table.insert(lines, "| " .. table.concat({
-      noctalia.tr("metric." .. metric.key), metric.display or "—", metric.period_text or metric.period or "—",
-      noctalia.tr("metric_status." .. (metric.status or "no_data")),
+      copyCell(noctalia.tr("metric." .. metric.key)),
+      copyCell(metric.display or "—"),
+      copyCell(metric.period_text or metric.period or "—"),
+      copyCell(noctalia.tr("metric_status." .. (metric.status or "no_data"))),
     }, " | ") .. " |")
   end
   if snapshot.status == "demo" then
@@ -85,10 +95,10 @@ local function render()
       onClick = function() request("refresh") end }),
     ui.button({ glyph = "settings", tooltip = noctalia.tr("settings"), onClick = function() noctalia.openSettings() end }),
   }
-  local needsAuth = status == "disconnected" or status == "reconnect_required" or #(snapshot.metrics or {}) == 0
-  table.insert(controls, ui.button({ text = noctalia.tr(needsAuth and "connect" or "reconnect"), enabled = not busy,
+  local isDisconnected = status == "disconnected" or status == "disconnected_revocation_failed" or status == "loading"
+  table.insert(controls, ui.button({ text = noctalia.tr(isDisconnected and "connect" or "reconnect"), enabled = not busy,
     onClick = function() request("auth") end }))
-  if not needsAuth then
+  if not isDisconnected then
     table.insert(controls, ui.button({ glyph = "logout", tooltip = noctalia.tr("disconnect"), enabled = not busy,
       onClick = function() confirmation = "disconnect"; render() end }))
   end
@@ -106,7 +116,7 @@ local function render()
       label(snapshot.today_text or snapshot.today or noctalia.tr("today"), { color = "on_surface_variant", fontSize = 14 }),
       label(snapshot.steps_text or "—", { fontSize = 36, fontWeight = "bold", color = "primary" }),
       label(noctalia.tr("steps_goal") .. " " .. formatGoal(goal), { color = "on_surface_variant" }),
-      ui.progress({ progress = steps and math.clamp(steps / divisor, 0, 1) or 0, height = 5, fill = "primary", track = "primary/0.15", radius = 3 }),
+      ui.progress({ progress = (if snapshot.goal == goal and snapshot.goal_percent ~= nil then math.clamp(snapshot.goal_percent / 100, 0, 1) elseif steps then math.clamp(steps / divisor, 0, 1) else 0), height = 5, fill = "primary", track = "primary/0.15", radius = 3 }),
     }),
     ui.scroll({ flexGrow = 1, gap = 5 }, rows),
     label(noctalia.tr("status." .. status), { color = "on_surface_variant", fontSize = 12, maxLines = 2 }),

@@ -5,6 +5,7 @@ import json
 import os
 import random
 import time
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
@@ -20,7 +21,11 @@ def default_state():
 
 def snapshot(cache):
     data = cache.read("snapshot.json", {})
-    if type(data.get("version")) is not int or data["version"] != 1 or not isinstance(data.get("metrics"), list):
+    if (
+        type(data.get("version")) is not int
+        or data["version"] != 1
+        or not isinstance(data.get("metrics"), list)
+    ):
         return {"version": 1, "status": "disconnected", "metrics": []}
     if any(not isinstance(m, dict) or not isinstance(m.get("key"), str) for m in data["metrics"]):
         return {"version": 1, "status": "invalid_cache", "metrics": []}
@@ -71,8 +76,8 @@ def sync(cache, vault, args):
             raise ValueError("invalid schedule")
     except (ValueError, TypeError):
         schedule = {}
-    # Source changes invalidate values; don't show data from the previous selection.
-    if old.get("source", args.source) != args.source:
+    # Corrupted cache or source changes invalidate values; don't show data from the previous selection.
+    if old.get("status") == "invalid_cache" or old.get("source", args.source) != args.source:
         old = {"version": 1, "metrics": []}
         cache.remove("snapshot.json")
         schedule = {}
@@ -158,19 +163,32 @@ def sync(cache, vault, args):
 
 def execute(args):
     try:
-        if args.command not in ("disconnect", "clear-cache"):
+        if args.command not in ("disconnect", "clear-cache", "history"):
             today(args.timezone)
         return _execute(args)
     except InvalidTimezone:
         return present(
             {"version": 1, "status": "invalid_timezone", "metrics": []},
-            time.time(), args.units, today().isoformat(), args.interval, args.goal,
+            time.time(),
+            args.units,
+            today().isoformat(),
+            args.interval,
+            args.goal,
         )
 
 
 def _execute(args):
     cache = Cache(args.state_dir)
     vault = Vault("democe/fitdash")
+    if args.command == "history":
+        creds = None
+        with suppress(AuthError):
+            creds = vault.load()
+        return {
+            "version": 1,
+            "status": "connected" if creds else "disconnected",
+            "history": cache.read("history.json", {}),
+        }
     if args.command == "demo":
         from fitdash.model import metric
 
@@ -218,8 +236,11 @@ def _execute(args):
                     data = {"version": 1, "status": "cache_cleared", "metrics": []}
                     cache.write("snapshot.json", data)
                 else:
-                    creds = vault.load()
-                    vault.clear()
+                    creds = None
+                    with suppress(AuthError):
+                        creds = vault.load()
+                    with suppress(AuthError):
+                        vault.clear()
                     for name in ("snapshot.json", "scheduler.json", "history.json", "auth.json"):
                         cache.remove(name)
                     data = {"version": 1, "status": "disconnected", "metrics": []}
@@ -236,17 +257,19 @@ def _execute(args):
                                 data["status"] = "disconnected_revocation_failed"
                         except requests.RequestException:
                             data["status"] = "disconnected_revocation_failed"
+                    if data["status"] == "disconnected_revocation_failed":
+                        cache.write("auth.json", {"status": "disconnected_revocation_failed"})
             except InvalidTimezone:
                 raise
             except AuthError as error:
                 data = snapshot(cache)
                 data["status"] = str(error)
-                cache.write("snapshot.json", data)
+                if args.command == "auth":
+                    cache.write("auth.json", {"status": str(error)})
             except Exception as error:
                 # Keep cache and credentials intact; never expose exception messages.
                 data = snapshot(cache)
                 data.update(status="backend_error", error_type=type(error).__name__)
-                cache.write("snapshot.json", data)
                 if args.command == "auth":
                     cache.write("auth.json", {"status": "backend_error"})
     units = args.units
@@ -258,19 +281,42 @@ def _execute(args):
         data,
         time.time(),
         units,
-        today("" if args.command in ("disconnect", "clear-cache") else args.timezone or data.get("timezone", "")).isoformat(),
+        today(
+            "" if args.command in ("disconnect", "clear-cache") else args.timezone or data.get("timezone", "")
+        ).isoformat(),
         args.interval,
         args.goal,
     )
 
 
+def bounded_int(val, min_val, max_val):
+    try:
+        n = int(val)
+    except (ValueError, TypeError):
+        raise argparse.ArgumentTypeError("invalid integer") from None
+    if not (min_val <= n <= max_val):
+        raise argparse.ArgumentTypeError(f"value out of range [{min_val}, {max_val}]")
+    return n
+
+
+class ArgumentError(ValueError):
+    """Raised when command-line arguments are invalid."""
+
+
+class JsonParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise ArgumentError("invalid_argument")
+
+
 def parser():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("command", choices=["status", "sync", "auth", "disconnect", "clear-cache", "demo"])
+    p = JsonParser(description=__doc__)
+    p.add_argument(
+        "command", choices=["status", "sync", "auth", "disconnect", "clear-cache", "demo", "history"]
+    )
     p.add_argument("--state-dir", default=str(default_state()))
     p.add_argument("--client", default=str(Path.home() / ".config/fitdash-widget/client.json"))
-    p.add_argument("--interval", type=int, default=300)
-    p.add_argument("--goal", type=int, default=10000)
+    p.add_argument("--interval", type=lambda v: bounded_int(v, 60, 3600), default=300)
+    p.add_argument("--goal", type=lambda v: bounded_int(v, 1, 100000), default=10000)
     p.add_argument("--force", action="store_true")
     p.add_argument(
         "--source", choices=["all-sources", "google-wearables", "google-sources"], default="all-sources"
@@ -282,10 +328,12 @@ def parser():
     return p
 
 
-def main():
-    args = parser().parse_args()
+def main(argv=None):
     try:
+        args = parser().parse_args(argv)
         data = execute(args)
+    except ArgumentError:
+        data = {"version": 1, "status": "invalid_argument", "metrics": []}
     except Busy:
         data = {"version": 1, "status": "busy"}
     except Exception as error:

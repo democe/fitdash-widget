@@ -48,6 +48,7 @@
   "metric_status.rate_limited": "En attente de nouvelle tentative",
   "metric_status.invalid_response": "Réponse inattendue",
   "metric_status.reconnect_required": "Reconnexion requise",
+  "status.invalid_argument": "Paramètre ou argument de commande non valide.",
   "status.invalid_timezone": "Fuseau horaire invalide. Choisissez un fuseau IANA ou laissez le paramètre vide pour utiliser celui du compte.",
   "status.loading": "Chargement de votre résumé…",
   "status.connected": "Connecté · Google Health",

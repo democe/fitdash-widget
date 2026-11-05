@@ -35,12 +35,15 @@ class Vault:
     def load(self):
         try:
             raw = self.keyring.get_password(self.service, "google-health")
-            if not raw:
-                return None
+        except Exception:
+            raise AuthError("keyring_unavailable") from None
+        if not raw:
+            return None
+        try:
             info = json.loads(raw)
             return Credentials.from_authorized_user_info(info)
         except Exception:
-            raise AuthError("keyring_unavailable") from None
+            return None
 
     def save(self, credentials):
         try:
@@ -98,9 +101,14 @@ def authenticate(client_path, vault, cache, scopes=SCOPES):
 
     def callback(environ, start_response):
         query = urllib.parse.parse_qs(environ.get("QUERY_STRING", ""))
-        valid = environ.get("PATH_INFO") == "/" and secrets.compare_digest(query.get("state", [""])[0].encode("utf-8"), state.encode("ascii"))
+        valid = environ.get("PATH_INFO") == "/" and secrets.compare_digest(
+            query.get("state", [""])[0].encode("utf-8"), state.encode("ascii")
+        )
         if not valid:
-            start_response("400 Bad Request", [("Content-Type", "text/plain; charset=utf-8"), ("Cache-Control", "no-store")])
+            start_response(
+                "400 Bad Request",
+                [("Content-Type", "text/plain; charset=utf-8"), ("Cache-Control", "no-store")],
+            )
             return [messages["oauth.invalid_callback"].encode("utf-8")]
         result.update(query)
         start_response(
@@ -110,10 +118,9 @@ def authenticate(client_path, vault, cache, scopes=SCOPES):
         body = (
             f'<!doctype html><html lang="{html.escape(language, quote=True)}" dir="auto">'
             '<meta charset="utf-8"><title>FitDash</title><body><h1>FitDash</h1>'
-            f'<p>{html.escape(messages[key])}</p></body></html>'
+            f"<p>{html.escape(messages[key])}</p></body></html>"
         )
         return [body.encode("utf-8")]
-
 
     with make_server("127.0.0.1", 0, callback, handler_class=QuietHandler) as server:
         server.timeout = 1

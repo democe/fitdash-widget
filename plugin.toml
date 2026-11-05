@@ -1,6 +1,6 @@
 id = "democe/fitdash"
 name = "FitDash"
-version = "0.1.0"
+version = "0.0.3"
 plugin_api = 24
 author = "Shawn Reavis"
 license = "MIT"

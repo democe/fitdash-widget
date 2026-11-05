@@ -22,7 +22,10 @@ local function render()
     ui.label({ text = text, fontWeight = "Regular" }),
   }))
   local tooltip = noctalia.tr("title") .. " · " .. (snapshot.today_text or snapshot.today or "") .. "\n"
-  if steps then tooltip ..= tostring(math.floor(steps / divisor * 100)) .. "% · " .. noctalia.tr("goal") .. " " .. formatGoal(goal) .. "\n" end
+  if steps then
+    local percent = (if snapshot.goal == goal and snapshot.goal_percent ~= nil then snapshot.goal_percent else math.floor(steps / divisor * 100))
+    tooltip ..= tostring(percent) .. "% · " .. noctalia.tr("goal") .. " " .. formatGoal(goal) .. "\n"
+  end
   tooltip ..= noctalia.tr("status." .. status)
   if snapshot.updated_at then tooltip ..= "\n" .. noctalia.tr("fetched") .. " " .. noctalia.formatTime("{:%H:%M}", snapshot.updated_at) end
   barWidget.setTooltip(tooltip)

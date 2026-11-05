@@ -44,8 +44,10 @@ def format_value(value, unit, units="metric", messages=None):
         _, messages = translation_catalog()
     if unit == "sleep_min":
         return messages["format.sleep"].format(
-            hours=int(value) // 60, minutes=f"{int(value) % 60:02d}",
-            hour_unit=messages["unit.h"], minute_unit=messages["unit.min"],
+            hours=int(value) // 60,
+            minutes=f"{int(value) % 60:02d}",
+            hour_unit=messages["unit.h"],
+            minute_unit=messages["unit.min"],
         )
     if unit == "mm":
         value /= 1_609_344 if units == "imperial" else 1_000_000
@@ -56,9 +58,7 @@ def format_value(value, unit, units="metric", messages=None):
     text = locale.format_string("%." + str(decimals) + "f", value, grouping=True)
     if not unit:
         return text
-    return messages["format.measurement"].format(
-        value=text, unit=messages.get("unit." + unit, unit)
-    )
+    return messages["format.measurement"].format(value=text, unit=messages.get("unit." + unit, unit))
 
 
 def format_date(value, messages):
@@ -95,9 +95,19 @@ def present(snapshot, now, units, current_date, interval=300, goal=10000):
         item["display"] = format_value(item.get("value"), item.get("unit", ""), units, messages)
         item["period_text"] = format_date(item.get("period"), messages)
         age = now - item.get("fetched_at", 0)
+        measurement_stale = False
+        if item.get("period"):
+            try:
+                obs_date = date.fromisoformat(item["period"])
+                cur_date = date.fromisoformat(current_date)
+                if (cur_date - obs_date).days >= (2 if item.get("group") == "sleep" else 3):
+                    measurement_stale = True
+            except (ValueError, TypeError):
+                pass
         if item.get("status") == "available" and (
             age > (5400 if item.get("group") in ("sleep", "vitals") else max(900, interval * 3))
             or (item.get("group") == "activity" and item.get("period") != current_date)
+            or measurement_stale
         ):
             item["status"] = "stale"
     steps = next((m for m in result.get("metrics", []) if m["key"] == "steps"), {})

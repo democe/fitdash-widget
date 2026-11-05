@@ -48,6 +48,7 @@
   "metric_status.rate_limited": "Waiting to retry",
   "metric_status.invalid_response": "Unexpected response",
   "metric_status.reconnect_required": "Reconnect needed",
+  "status.invalid_argument": "Invalid setting or command argument.",
   "status.invalid_timezone": "Invalid time zone. Choose an IANA time zone or leave the setting blank to use your account.",
   "status.loading": "Loading your summary…",
   "status.connected": "Connected · Google Health",
